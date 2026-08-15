@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 运行时层：上下文门面、事件总线（五模式）、服务存储（属主）、Effect、日志门面 -->
+    <RootNamespace>Keystone.Runtime</RootNamespace>
+    <PackageId>Keystone.Runtime</PackageId>
+    <Description>Keystone runtime: context facade, five-mode event bus, service store, effects, logging facade.</Description>
+    <!-- ADR-0015：Proto.Actor 库自身 AOT 警告（IL2104/IL3053）例外 -->
+    <NoWarn>$(NoWarn);IL2104;IL3053</NoWarn>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Keystone.Core\Keystone.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="Proto.Actor" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Meziantou.Analyzer">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

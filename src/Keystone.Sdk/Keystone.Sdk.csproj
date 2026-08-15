@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 插件 SDK（10）：插件作者友好包，引用 Runtime 重暴露接口面 + 计时器 + manifest schema -->
+    <RootNamespace>Keystone.Sdk</RootNamespace>
+    <PackageId>Keystone.Sdk</PackageId>
+    <Description>Keystone plugin SDK: timers, manifest schema validation, plugin author surface.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Keystone.Runtime\Keystone.Runtime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Meziantou.Analyzer">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

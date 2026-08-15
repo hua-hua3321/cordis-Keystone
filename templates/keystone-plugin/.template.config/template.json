@@ -1,0 +1,10 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Keystone",
+  "classifications": ["Keystone", "Plugin"],
+  "identity": "Keystone.Plugin.Template",
+  "name": "Keystone Plugin",
+  "shortName": "keystone-plugin",
+  "sourceName": "KeystonePlugin",
+  "preferNameDirectory": true
+}

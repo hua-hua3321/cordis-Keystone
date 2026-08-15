@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 管理层/宿主嵌入形态（09）：把 Config + Runtime 串成可运行宿主 -->
+    <RootNamespace>Keystone.Hosting</RootNamespace>
+    <PackageId>Keystone.Hosting</PackageId>
+    <Description>Keystone hosting layer: bootstrap, hosting API (CRUD/mount), management events.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Keystone.Config\Keystone.Config.csproj" />
+    <ProjectReference Include="..\Keystone.Runtime\Keystone.Runtime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Meziantou.Analyzer">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>
