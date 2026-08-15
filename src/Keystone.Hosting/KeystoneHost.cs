@@ -232,6 +232,57 @@ public sealed class KeystoneHost : IAsyncDisposable
         EntryInit?.Invoke(this, new EntryInitEventArgs(new EntryOptions { Id = manifest.Id, Name = source.Id }));
     }
 
+    // ── 热更新（G-C8，09 §5 ReloadPlugin/UpdatePlugin 承诺）──
+
+    /// <summary>
+    /// 插件冷重启（G-C8）：重新编译源码 + 换新 loader（新 ALC + 新 runtime）→ 旧 quiesce + ALC.Unload。
+    /// 对齐 08 §6.1 "name/inject/group 变 → 冷重启"分级。
+    /// </summary>
+    public async Task ReloadPluginAsync(string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        var entry = FindEntry(_tree, id)
+            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
+        var manifest = _options.ManifestProvider(entry);
+        var source = _options.SourceProvider(entry);
+        var config = await ResolvePluginConfigAsync(entry).ConfigureAwait(false);
+
+        var loader = await PluginLoader.CreateAsync(
+            source, manifest, _registry, ctxId => new ContextFacade(ctxId, _rootContext), config).ConfigureAwait(false);
+
+        var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
+        if (hosted is not null)
+        {
+            await hosted.Loader.DisposeAsync().ConfigureAwait(false);
+            _plugins.Remove(hosted);
+        }
+
+        _plugins.Add(new HostedPlugin(id, loader));
+        EntryInit?.Invoke(this, new EntryInitEventArgs(entry));
+        NotifyConfigUpdate();
+    }
+
+    /// <summary>
+    /// 插件配置热更新（G-C8）：更新条目 config → PatchContext 瀑布（可否决）→ 重载。
+    /// 对齐 08 §6.1 "仅 config 变 → 热更新"分级 + ADR-0005 决策 3。
+    /// </summary>
+    public async Task UpdatePluginAsync(string id, object? newConfig)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        var entry = FindEntry(_tree, id)
+            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
+        var updated = entry with { Config = newConfig };
+
+        // 瀑布可否决（F9 PatchContext：不调 apply 即否决）
+        await PatchContextAsync(updated, async () =>
+        {
+            ReplaceEntry(_tree, updated);
+            await ReloadPluginAsync(id).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+    }
+
     // ── 管理面事件：PatchContext（waterfall 可否决，F9）──
 
     /// <summary>订阅上下文补丁瀑布（不调 next 即否决）。</summary>

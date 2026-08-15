@@ -58,6 +58,7 @@ created: 2026-08-15
 | P28 差距 G-C6 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | waterfall terminal 注入（§7.28：发布者注入内置行为 + 返回值，221/221 全绿） | §7.28 |
 | P29 差距 G-C5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | M4 方法级延迟注入（§7.29：GetLazy 首次访问解析，224/224 全绿） | §7.29 |
 | P30 差距 G-C7 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 日志导出器抽象（§7.30：ILogSink + Console sink，228/228 全绿） | §7.30 |
+| P31 差距 G-C8 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 热更新 API（§7.31：ReloadPlugin/UpdatePlugin，231/231 全绿） | §7.31 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -130,6 +131,7 @@ created: 2026-08-15
 | ID-24 | 2026-08-15 | P28 | waterfall 发布者注入 terminal（G-C6）：`PublishWaterfallAsync` 增 `Func<Task<object?>>? terminal`（最内层 next，可被否决）+ 返回值；监听器不调 next → 否决（terminal 未执行，null） | Cordis waterfall 返回值语义（events.ts:234-243）："发布者注入内置行为，可被否决"的核心用法 | `src/Keystone.Runtime/Events/EventBus.cs`、`IEventBus.cs` | 否（16-cordis-gap-review G-C6 备注） |
 | ID-25 | 2026-08-15 | P29 | M4 方法级延迟注入（G-C5）：`IPluginContext.GetLazy<T>` 返回 `Lazy<Task<T>>`——首次访问 .Value 才解析（服务不可用抛 GatingServiceNotFound）；Lazy 缓存（只解析一次） | 兑现 12 文档 M4 声称的 Lazy 对应物；对齐 Cordis @Inject 方法级（registry.ts:45-59）：初始化声明、方法执行时解析 | `src/Keystone.Runtime/Context/IPluginContext.cs`、`ContextFacade.cs` | 否（16-cordis-gap-review G-C5 备注） |
 | ID-26 | 2026-08-15 | P30 | 日志导出器抽象（G-C7）：`ILogSink`（Write(LogRecord)，对齐 Cordis Exporter）+ `ConsoleLogSink`（结构化行 + 可选 ANSI 配色）；RingBufferLoggerProvider sinks 注入 + 分发 | 兑现 05 §5 "Console（默认）+ 可选 File/exporter"承诺；日志从内存快照变为可输出 | `src/Keystone.Runtime/Logging/`（ILogSink/ConsoleLogSink/RingBufferLoggerProvider） | 否（16-cordis-gap-review G-C7 备注） |
+| ID-27 | 2026-08-15 | P31 | 热更新 API（G-C8）：`ReloadPluginAsync`（冷重启：重编译 + 新 ALC）+ `UpdatePluginAsync`（热更新：config 变 → PatchContext 瀑布可否决 → 重载）；FileSystemWatcher 由嵌入方经 ConfigUpdate 事件接线 | 兑现 09 §5 ReloadPlugin/UpdatePlugin + 08 §6.1 变更分级；宿主用 YAML 字符串启动无文件源，watcher 不内置 | `src/Keystone.Hosting/KeystoneHost.cs` | 否（16-cordis-gap-review G-C8 备注） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -543,6 +545,16 @@ created: 2026-08-15
 | 2026-08-15 | W30-02 | RingBufferLoggerProvider 增 sinks 注入 + Write 分发到全部 sink（缓冲快照兼容） | 实现（TDD） | G-C7 | `src/Keystone.Runtime/Logging/RingBufferLoggerProvider.cs` | 现有快照测试全绿 | ✅ |
 | 2026-08-15 | W30-03 | 全量回归 228/228 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.31 P31 差距 G-C8：热更新 API
+
+> 16-cordis-gap-review G-C8（🟡 中危）：09 §5 承诺 `ReloadPlugin`/`UpdatePlugin` 未实现。本次落 `ReloadPluginAsync`（冷重启）+ `UpdatePluginAsync`（热更新，瀑布可否决）。FileSystemWatcher 由嵌入方接线（宿主用 YAML 字符串启动无文件源，ConfigUpdate 事件可订阅）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W31-01 | `ReloadPluginAsync(id)`：重编译源码 + 新 loader（新 ALC）→ 旧 quiesce + Unload（08 §6.1 冷重启分级） | 实现（TDD） | G-C8；09 §5；08 §6.1 | `src/Keystone.Hosting/KeystoneHost.cs` | `HotReloadTests.ReloadPlugin_restarts` | ✅ |
+| 2026-08-15 | W31-02 | `UpdatePluginAsync(id, config)`：更新条目 config → PatchContext 瀑布（可否决）→ 重载（08 §6.1 热更新分级 + ADR-0005） | 实现（TDD） | G-C8；ADR-0005 决策 3 | 同上 | `HotReloadTests.UpdatePlugin_*`（2） | ✅ |
+| 2026-08-15 | W31-03 | 全量回归 231/231 + Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -627,6 +639,8 @@ created: 2026-08-15
 | ID-25 | G-C5/M4 | `Context/`（GetLazy） | W29-01~02 |
 | W30-01~02 | ID-26 | `Logging/`（ILogSink/ConsoleLogSink/RingBuffer） | `LogSinkTests`（4） |
 | ID-26 | G-C7 | `Logging/`（sink 抽象） | W30-01~03 |
+| W31-01~02 | ID-27 | `Keystone.Hosting/KeystoneHost.cs` | `HotReloadTests`（3） |
+| ID-27 | G-C8 | `Keystone.Hosting/KeystoneHost.cs` | W31-01~03 |
 
 ## 9. 维护规则
 

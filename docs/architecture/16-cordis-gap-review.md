@@ -9,7 +9,7 @@ created: 2026-08-15
 > 对照 vendored Cordis 源码（`~/Projects/deepseek-harness/vendor/cordis/src/`，9 模块 2693 行）与 Keystone **当前实现**（M0-M13 + P14-P22，209 测试）的差距复核。
 > 07-cordis-migration-gap 是**设计期**差距分析（0 覆盖/7 部分/0 未覆盖）；本文是**实现后**复核——验证设计期映射是否真正落地，找出仍缺的实现缺口。
 > 方法：4 个独立子代理并行审计（Events/Registry+Service/Reflect+Context/Logger+Utils）+ 主代理独立验证关键点。
-> 执行状态：**🔴 3 高危已全部闭合（P24 G-C1 / P25 G-C2 / P26 G-C3，见 14-implementation-log）**；中危待排期。
+> 执行状态：**🔴 3 高危 + 🟡 5 中危已全部闭合（P24-P31，见 14-implementation-log §7.24-7.31）**；🟢 低危记录保持。
 
 ## 1. 综合差距清单（按严重度）
 
@@ -29,7 +29,7 @@ created: 2026-08-15
 | G-C5 | **M4 方法级延迟注入未落地** | `@Inject` 方法调用等到服务可用（registry.ts:45-59） | ~~12 文档声称 `Lazy<Task<T>>`，实现 grep 零命中；`IPluginContext.Get` 同步抛 GatingServiceNotFound~~ **✅ 已闭合（P29）**：`GetLazy<T>` 返回 `Lazy<Task<T>>`——首次访问解析（Lazy 缓存，只解析一次） | 文档声称已映射但实现缺失 → 已补齐 |
 | G-C6 | **waterfall 发布者注入 terminal 缺失** | 发布者注入最内层 next，返回最外层值（events.ts:234-243） | ~~`PublishWaterfallAsync` terminal 硬编码 `Task.CompletedTask`（EventBus.cs:144）~~ **✅ 已闭合（P28）**：terminal 可注入 + 返回值；监听器不调 next → 否决（null） | "内置行为可被否决"核心用法可用 |
 | G-C7 | **日志导出器抽象缺失** | Exporter 可插拔 sink（多导出器/per-exporter formatters/levels/maxLength，logger.ts:41-131） | ~~仅内建 RingBuffer + `GetSnapshot()`；无第二输出挂载点；无终端 sink~~ **✅ 已闭合（P30）**：`ILogSink`（对齐 Exporter）+ `ConsoleLogSink`（结构化行 + 可选 ANSI 配色）；RingBufferLoggerProvider sinks 注入分发 | 日志可输出（兑现 05 §5） |
-| G-C8 | **热更新触发缺失** | 文件监听 → 原子替换/重载（09 承诺；fiber.ts update/restart） | `PluginLoader.ReloadAsync` 存在但**无 FileSystemWatcher 接线**；`KeystoneHost` 无 `ReloadPlugin`/`UpdatePlugin` API（09 §5 表格承诺未实现） | 热更新原语有，触发机制无 |
+| G-C8 | **热更新触发缺失** | 文件监听 → 原子替换/重载（09 承诺；fiber.ts update/restart） | ~~`PluginLoader.ReloadAsync` 存在但无 FileSystemWatcher 接线；`KeystoneHost` 无 ReloadPlugin/UpdatePlugin API~~ **✅ 已闭合（P31）**：`ReloadPluginAsync`（冷重启）+ `UpdatePluginAsync`（热更新，瀑布可否决）；FileSystemWatcher 由嵌入方经 ConfigUpdate 事件接线 | 09 §5 hosting API 兑现 |
 
 ### 🟢 低危（DX 或已接受丢弃）
 
@@ -65,17 +65,17 @@ created: 2026-08-15
 | P0 | G-C1 配置注入 | ✅ 已执行（P24，14 §7.24/ID-20）：`KeystoneHostOptions.ConfigSchemaProvider` + `ConfigResolver` 校验/默认值 → `InitializeAsync`；无 schema 直传；校验失败 = 插件 FAILED（隔离） | 中 |
 | P0 | G-C2 依赖 re-arm | ✅ 已执行（P25，14 §7.25/ID-21）：依赖重现自动重启；订阅生命周期区分（自动卸载保留/显式停止销毁）；StartCoreAsync 接受 Disposed 恢复路径 | 中 |
 | P0 | G-C3 服务值注销 | ✅ 已执行（P26，14 §7.26/ID-22）：`IServiceStore.Remove` + ContextFacade 属主追踪 + 卸载钩子；运行期值注销，依赖方不再拿陈旧值 | 小 |
-| P1 | G-C5 M4 延迟注入 | `IPluginContext.GetLazy<T>` / `Task<T>` 延迟解析（Lazy 语义） | 中 |
-| P1 | G-C4 事件 false 语义 | `EventBus` serial/bail 判定改 `value is null`（对齐 isBailed：false 不短路） | 小 |
-| P1 | G-C6 waterfall terminal | `PublishWaterfallAsync` 支持注入最内层 next + 返回最外层值 | 小 |
-| P1 | G-C7/G-C12 日志输出 | `IExporter` 抽象 + Console sink（含可选 ANSI 配色）挂到 LoggerProvider 外 | 中 |
-| P2 | G-C8 热更新触发 | `FileSystemWatcher` 接线 + `KeystoneHost.ReloadPlugin/UpdatePlugin` | 中 |
+| P1 | G-C5 M4 延迟注入 | ✅ 已执行（P29，14 §7.29/ID-25）：`GetLazy<T>`（Lazy\<Task\<T\>\> 首次访问解析） | 中 |
+| P1 | G-C4 事件 false 语义 | ✅ 已执行（P27，14 §7.27/ID-23）：`IsBailed` 对齐（null/false 不短路） | 小 |
+| P1 | G-C6 waterfall terminal | ✅ 已执行（P28，14 §7.28/ID-24）：terminal 注入 + 返回值 | 小 |
+| P1 | G-C7/G-C12 日志输出 | ✅ 已执行（P30，14 §7.30/ID-26）：`ILogSink` + `ConsoleLogSink`（含 ANSI 配色） | 中 |
+| P2 | G-C8 热更新触发 | ✅ 已执行（P31，14 §7.31/ID-27）：`ReloadPluginAsync`/`UpdatePluginAsync`；watcher 由嵌入方经 ConfigUpdate 接线 | 中 |
 
 ## 5. 结论
 
 - **核心骨架已等价覆盖**：生命周期状态机、quiesce、五分发事件、服务门控、Effect、Trace、配置层、加载层——设计期"7 项部分覆盖"的**主语义**均已落地
-- **真实差距 8 项**（3 高 + 5 中）：**🔴 3 高危已全部闭合（P24-P26）**——配置注入（G-C1）、依赖 re-arm（G-C2）、值注销（G-C3）；🟡 5 中危待排期（事件 false 语义/延迟注入/waterfall terminal/日志导出器/热更新触发）
-- **根因**：M3/P3 阶段的"功能独立测试通过"未做宿主级接线验收；事件语义映射停留在文档层未逐条对照源码
+- **真实差距 8 项**（3 高 + 5 中）：**🔴 3 高危 + 🟡 5 中危已全部闭合（P24-P31）**——配置注入（G-C1）、依赖 re-arm（G-C2）、值注销（G-C3）、事件 false 语义（G-C4）、M4 延迟注入（G-C5）、waterfall terminal（G-C6）、日志导出器（G-C7）、热更新 API（G-C8）；🟢 低危记录保持
+- **根因**：M3/P3 阶段的"功能独立测试通过"未做宿主级接线验收；事件语义映射停留在文档层未逐条对照源码——已通过 P24-P31 逐项补齐
 
 ## 关联
 
