@@ -78,8 +78,9 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         // 2. schema 校验（Parser 已校验条目结构/重复 id）
 
-        // 3. manifest 校验（依赖图可达 + 无环，ADR-0007）
-        var manifests = EnumerateLeaves(entries).Select(_options.ManifestProvider).ToList();
+        // 3. manifest 校验（依赖图可达 + 无环，ADR-0007）——active 叶子
+        //    （DC-16：挂起条目不参与运行，其 inject 引用放宽——恢复加载时再校验）
+        var manifests = EnumerateActiveLeaves(entries).Select(_options.ManifestProvider).ToList();
         ManifestValidator.Validate(manifests);
 
         // 4-5. 根 context（能力域 context 挂其下，03 §1）+ 能力域（01 §2 管理层职责，09 §2）
@@ -91,7 +92,8 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
 
         // 6-7. 并行加载：依赖门控（PENDING 等待）天然实现拓扑序
-        await Task.WhenAll(EnumerateLeaves(entries).Select(LoadEntryAsync)).ConfigureAwait(false);
+        // DC-16：disabled 挂起条目（含父组继承）不参与加载拓扑
+        await Task.WhenAll(EnumerateActiveLeaves(entries).Select(LoadEntryAsync)).ConfigureAwait(false);
 
         // 8. 就绪
         _shutdown = false;
@@ -438,6 +440,35 @@ public sealed class KeystoneHost : IAsyncDisposable
                 _options.FileProvider ?? (_ => null))
             : null;
 
+    /// <summary>挂起/恢复条目（DC-16，08 §3）：disabled=true 卸载但树保留（挂起不删）；false 加载恢复。</summary>
+    public async Task SetEntryDisabledAsync(string id, bool disabled)
+    {
+        ThrowIfShuttingDown();
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        var entry = FindEntry(_tree, id)
+            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
+        var updated = entry with { Disabled = disabled ? true : null };
+
+        var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
+        if (disabled)
+        {
+            if (hosted is not null)
+            {
+                EntryDisposing?.Invoke(this, new EntryDisposingEventArgs(id, active: true));
+                await hosted.Loader.DisposeAsync().ConfigureAwait(false); // 卸载（条目保留）
+                _plugins.Remove(hosted);
+            }
+        }
+        else if (hosted is null && !updated.IsGroup)
+        {
+            await LoadEntryAsync(updated).ConfigureAwait(false); // 改回即恢复（08 §3）
+        }
+
+        ReplaceEntry(_tree, updated);
+        NotifyConfigUpdate();
+    }
+
     private static IEnumerable<EntryOptions> EnumerateLeaves(IEnumerable<EntryOptions> entries)
     {
         foreach (var entry in entries)
@@ -445,6 +476,33 @@ public sealed class KeystoneHost : IAsyncDisposable
             if (entry.Group is not null)
             {
                 foreach (var child in EnumerateLeaves(entry.Group))
+                {
+                    yield return child;
+                }
+            }
+            else
+            {
+                yield return entry;
+            }
+        }
+    }
+
+    /// <summary>
+    /// DC-16（08 §3）：挂起条目枚举——disabled=true（自身或祖先）的叶子排除；
+    /// 组条目自身永不被挂起（其子树跟随组 disabled 继承）。
+    /// </summary>
+    private static IEnumerable<EntryOptions> EnumerateActiveLeaves(IEnumerable<EntryOptions> entries)
+    {
+        foreach (var entry in entries)
+        {
+            if (entry.Disabled == true)
+            {
+                continue; // 父组挂起 → 整个子树不参与加载
+            }
+
+            if (entry.Group is not null)
+            {
+                foreach (var child in EnumerateActiveLeaves(entry.Group))
                 {
                     yield return child;
                 }
