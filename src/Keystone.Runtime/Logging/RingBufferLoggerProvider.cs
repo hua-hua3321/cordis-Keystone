@@ -12,12 +12,17 @@ public sealed class RingBufferLoggerProvider : ILoggerProvider
     private readonly ConcurrentQueue<LogRecord> _buffer;
     private readonly int _capacity;
     private readonly IReadOnlyDictionary<string, LogLevel> _overrides;
+    private readonly IReadOnlyList<ILogSink> _sinks;
 
-    public RingBufferLoggerProvider(int capacity = 1000, IReadOnlyDictionary<string, LogLevel>? overrides = null)
+    public RingBufferLoggerProvider(
+        int capacity = 1000,
+        IReadOnlyDictionary<string, LogLevel>? overrides = null,
+        IReadOnlyList<ILogSink>? sinks = null)
     {
         _capacity = capacity;
         _buffer = new ConcurrentQueue<LogRecord>();
         _overrides = overrides ?? new Dictionary<string, LogLevel>(StringComparer.Ordinal);
+        _sinks = sinks ?? []; // G-C7：sink 可注入（Console 默认由宿主接线，05 §5）
     }
 
     public ILogger CreateLogger(string categoryName) => new RingLogger(this, categoryName);
@@ -27,10 +32,17 @@ public sealed class RingBufferLoggerProvider : ILoggerProvider
 
     internal void Write(string categoryName, LogLevel level, Guid? taskId, string message, Exception? exception = null)
     {
-        _buffer.Enqueue(new LogRecord(DateTimeOffset.UtcNow, taskId, categoryName, level, message, exception));
+        var record = new LogRecord(DateTimeOffset.UtcNow, taskId, categoryName, level, message, exception);
+        _buffer.Enqueue(record);
         while (_buffer.Count > _capacity)
         {
             _buffer.TryDequeue(out _);
+        }
+
+        // G-C7：分发到全部输出目标（Console/File/远端）
+        foreach (var sink in _sinks)
+        {
+            sink.Write(record);
         }
     }
 

@@ -57,6 +57,7 @@ created: 2026-08-15
 | P27 差距 G-C4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 事件 false 短路语义（§7.27：serial/bail 对齐 isBailed，218/218 全绿） | §7.27 |
 | P28 差距 G-C6 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | waterfall terminal 注入（§7.28：发布者注入内置行为 + 返回值，221/221 全绿） | §7.28 |
 | P29 差距 G-C5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | M4 方法级延迟注入（§7.29：GetLazy 首次访问解析，224/224 全绿） | §7.29 |
+| P30 差距 G-C7 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 日志导出器抽象（§7.30：ILogSink + Console sink，228/228 全绿） | §7.30 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -128,6 +129,7 @@ created: 2026-08-15
 | ID-23 | 2026-08-15 | P27 | 事件决策短路语义（G-C4）：`IsBailed` 对齐 Cordis isBailed——serial/bail 中 null/false 不算决策值（不短路），0/空串等其余值短路 | events.ts:13-15 语义精确对齐；避免返回 false 的监听器提前截断链 | `src/Keystone.Runtime/Events/EventBus.cs` | 否（16-cordis-gap-review G-C4 备注） |
 | ID-24 | 2026-08-15 | P28 | waterfall 发布者注入 terminal（G-C6）：`PublishWaterfallAsync` 增 `Func<Task<object?>>? terminal`（最内层 next，可被否决）+ 返回值；监听器不调 next → 否决（terminal 未执行，null） | Cordis waterfall 返回值语义（events.ts:234-243）："发布者注入内置行为，可被否决"的核心用法 | `src/Keystone.Runtime/Events/EventBus.cs`、`IEventBus.cs` | 否（16-cordis-gap-review G-C6 备注） |
 | ID-25 | 2026-08-15 | P29 | M4 方法级延迟注入（G-C5）：`IPluginContext.GetLazy<T>` 返回 `Lazy<Task<T>>`——首次访问 .Value 才解析（服务不可用抛 GatingServiceNotFound）；Lazy 缓存（只解析一次） | 兑现 12 文档 M4 声称的 Lazy 对应物；对齐 Cordis @Inject 方法级（registry.ts:45-59）：初始化声明、方法执行时解析 | `src/Keystone.Runtime/Context/IPluginContext.cs`、`ContextFacade.cs` | 否（16-cordis-gap-review G-C5 备注） |
+| ID-26 | 2026-08-15 | P30 | 日志导出器抽象（G-C7）：`ILogSink`（Write(LogRecord)，对齐 Cordis Exporter）+ `ConsoleLogSink`（结构化行 + 可选 ANSI 配色）；RingBufferLoggerProvider sinks 注入 + 分发 | 兑现 05 §5 "Console（默认）+ 可选 File/exporter"承诺；日志从内存快照变为可输出 | `src/Keystone.Runtime/Logging/`（ILogSink/ConsoleLogSink/RingBufferLoggerProvider） | 否（16-cordis-gap-review G-C7 备注） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -531,6 +533,16 @@ created: 2026-08-15
 | 2026-08-15 | W29-01 | `IPluginContext.GetLazy<T>`（返回 Lazy\<Task\<T\>\>，首次访问 .Value 才解析）+ ContextFacade 实现 | 实现（TDD） | G-C5/M4；registry.ts:45-59 | `src/Keystone.Runtime/Context/IPluginContext.cs`、`ContextFacade.cs` | `LazyInjectionTests`（3） | ✅ |
 | 2026-08-15 | W29-02 | 全量回归 224/224 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.30 P30 差距 G-C7：日志导出器抽象
+
+> 16-cordis-gap-review G-C7（🟡 中危）：无 Exporter 抽象（仅内存 RingBuffer），日志不可见。本次落 `ILogSink` + `ConsoleLogSink`（兑现 05 §5 "Console（默认）"承诺，对齐 Cordis Exporter）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W30-01 | `ILogSink`（Write(LogRecord)，对齐 Cordis Exporter.export）+ `ConsoleLogSink`（结构化行 + 可选 ANSI 级别配色） | 实现（TDD） | G-C7；05 §5；logger.ts:41-47 | `src/Keystone.Runtime/Logging/ILogSink.cs`、`ConsoleLogSink.cs` | `LogSinkTests`（4） | ✅ |
+| 2026-08-15 | W30-02 | RingBufferLoggerProvider 增 sinks 注入 + Write 分发到全部 sink（缓冲快照兼容） | 实现（TDD） | G-C7 | `src/Keystone.Runtime/Logging/RingBufferLoggerProvider.cs` | 现有快照测试全绿 | ✅ |
+| 2026-08-15 | W30-03 | 全量回归 228/228 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -613,6 +625,8 @@ created: 2026-08-15
 | ID-24 | G-C6 | `Events/`（waterfall terminal） | W28-01~02 |
 | W29-01 | ID-25 | `Context/IPluginContext.cs`、`ContextFacade.cs` | `LazyInjectionTests`（3） |
 | ID-25 | G-C5/M4 | `Context/`（GetLazy） | W29-01~02 |
+| W30-01~02 | ID-26 | `Logging/`（ILogSink/ConsoleLogSink/RingBuffer） | `LogSinkTests`（4） |
+| ID-26 | G-C7 | `Logging/`（sink 抽象） | W30-01~03 |
 
 ## 9. 维护规则
 
