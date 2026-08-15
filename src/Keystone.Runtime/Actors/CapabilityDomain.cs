@@ -52,19 +52,22 @@ public sealed class CapabilityDomain : IAsyncDisposable
     /// 缺省 null = 独立实例）。
     /// <paramref name="supervision"/> = 监督策略（05 §2/09 §3，DC-4）：OneForOne（默认 Restart decider +
     /// 3 次重试/5s 窗口，超阈值停止不再重启 = 域不可用）；可自定义。
+    /// <paramref name="eventStore"/> = 事实持久化（DC-11，ADR-0009）：任务完成/失败事实写入；
+    /// parentContext 总线已携带存储时可省（共享总线）。
     /// </summary>
     public CapabilityHandle Spawn(
         string instanceName,
         Func<TaskEnvelope, Task<TaskResultEnvelope>> handler,
         IReadOnlyList<IMiddleware>? middlewares = null,
         Keystone.Runtime.Context.IContext? parentContext = null,
-        CapabilitySupervisionOptions? supervision = null)
+        CapabilitySupervisionOptions? supervision = null,
+        Keystone.Runtime.Persistence.IEventStore? eventStore = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
         ArgumentNullException.ThrowIfNull(handler);
 
         supervision ??= new CapabilitySupervisionOptions();
-        var props = Props.FromProducer(() => new CapabilityActor(instanceName, handler, middlewares, parentContext))
+        var props = Props.FromProducer(() => new CapabilityActor(instanceName, handler, middlewares, parentContext, eventStore))
             .WithGuardianSupervisorStrategy(new OneForOneStrategy(
                 decider: (_, _) => Proto.SupervisorDirective.Restart, // DC-4：崩溃重启（默认）
                 maxNrOfRetries: supervision.MaxRestarts,

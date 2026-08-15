@@ -65,7 +65,8 @@ public sealed class KeystoneHost : IAsyncDisposable
         ManifestValidator.Validate(manifests);
 
         // 4-5. 根 context（能力域 context 挂其下，03 §1）+ 能力域（01 §2 管理层职责，09 §2）
-        _rootContext = new ContextFacade("root");
+        // DC-11：根总线携带事实存储——插件 context（子链共享总线）的生命周期事实自动持久化
+        _rootContext = new ContextFacade("root", eventStore: _options.EventStore);
         if (_options.EnableCapabilityDomain)
         {
             _capabilityDomain = CapabilityDomain.Create(_options.CapabilityDomainName);

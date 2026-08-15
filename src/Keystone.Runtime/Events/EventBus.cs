@@ -1,4 +1,5 @@
 using Keystone.Runtime.Context;
+using Keystone.Runtime.Persistence;
 
 namespace Keystone.Runtime.Events;
 
@@ -7,11 +8,22 @@ namespace Keystone.Runtime.Events;
 /// scope 过滤（G15：监听者是发布者祖先/自身才投递；global 跳过）。
 /// 总线实例在 context 链间**共享**（子 context 复用父的总线，对齐 Cordis 单事件系统 +
 /// 监听 filter）；发布者由发布方法显式携带（ID-08）。
+/// DC-11（ADR-0009/03 §4）：注入 <see cref="IEventStore"/> 后，<see cref="IFactEvent"/>
+/// 在 emit 分发时持久化（durable 失败传播；非 durable 尽力写降级）。
 /// </summary>
 public sealed class EventBus : IEventBus
 {
+    private const int FactSchemaVersion = 1;
+
     private readonly Lock _lock = new();
     private readonly Dictionary<Type, List<HandlerEntry>> _handlers = [];
+    private readonly IEventStore? _eventStore;
+
+    /// <summary>创建总线（可选事实持久化存储，DC-11；null = 不持久化）。</summary>
+    public EventBus(IEventStore? eventStore = null)
+    {
+        _eventStore = eventStore;
+    }
 
     public IDisposable Subscribe<TEvent>(Action<TEvent> handler, EventSubscriptionOptions? options = null)
         => Register(typeof(TEvent), handler, DispatchMode.Emit, options);
@@ -28,8 +40,14 @@ public sealed class EventBus : IEventBus
     public IDisposable SubscribeWaterfall<TEvent>(WaterfallHandler<TEvent> handler, EventSubscriptionOptions? options = null)
         => Register(typeof(TEvent), handler, DispatchMode.Waterfall, options);
 
-    public Task EmitAsync<TEvent>(TEvent e, IContext? publisher = null, CancellationToken cancellationToken = default)
+    public async Task EmitAsync<TEvent>(TEvent e, IContext? publisher = null, CancellationToken cancellationToken = default)
     {
+        // DC-11：事实事件先记录后分发（观察者异常不丢事实；ADR-0009 决策 3 降级语义）
+        if (e is IFactEvent fact)
+        {
+            await PersistFactAsync(fact).ConfigureAwait(false);
+        }
+
         foreach (var entry in Snapshot<TEvent>(DispatchMode.Emit))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -41,8 +59,35 @@ public sealed class EventBus : IEventBus
             MarkOnce(entry);
             ((Action<TEvent>)entry.Handler)(e); // 同步调用：首错传播（对齐 Cordis emit）
         }
+    }
 
-        return Task.CompletedTask;
+    /// <summary>事实持久化（DC-11，ADR-0009 决策 3）：非 durable 尽力写（失败降级）；durable 写失败传播。</summary>
+    private async Task PersistFactAsync(IFactEvent fact)
+    {
+        if (_eventStore is null)
+        {
+            return;
+        }
+
+        var stored = new StoredFact
+        {
+            SchemaVersion = FactSchemaVersion,
+            FactId = Guid.NewGuid(),
+            EventName = fact.GetType().Name,
+            TaskId = fact.TaskId,
+            Capability = fact.Capability,
+            PayloadBytes = fact.Payload,
+            Timestamp = DateTimeOffset.UtcNow,
+        };
+
+        try
+        {
+            await _eventStore.AppendAsync(stored).ConfigureAwait(false);
+        }
+        catch (Exception) when (!fact.Durable)
+        {
+            // 尽力写降级：持久化失败不影响主链路（记日志/告警由嵌入方经 store 实现承担）
+        }
     }
 
     public async Task PublishParallelAsync<TEvent>(TEvent e, IContext? publisher = null, CancellationToken cancellationToken = default)

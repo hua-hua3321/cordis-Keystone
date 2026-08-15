@@ -66,6 +66,7 @@ created: 2026-08-15
 | P36 文档达标 DC-5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 依赖超时接线（§7.36：依赖永不就绪→FAILED，246/246 全绿） | §7.36 |
 | P37 文档达标 DC-4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 监督策略（§7.37：OneForOne + 重启计数 + 超阈值停止，248/248 全绿） | §7.37 |
 | P38 文档达标 DC-8 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 静态插值接线（§7.38：!!env/!!file tag 语法 + 环检测 + 宿主提供者注入，258/258 全绿） | §7.38 |
+| P39 文档达标 DC-11 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 事实事件接入运行链（§7.39：IFactEvent + 任务/生命周期事实 + 宿主 EventStore，266/266 全绿） | §7.39 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -145,6 +146,7 @@ created: 2026-08-15
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 | ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
 | ID-33 | 2026-08-16 | P38 | 静态插值双层形态（DC-8，ADR-0012）：YAML 整值标量走 tag 形态（!!env NAME/!!file path，YamlDotNet TagName）；文本内容内引用走冒号前缀形态（!!env:NAME）；缺失保留标记（tag 形态重构为 `!!env NAME` 字符串，不静默替换）；环检测 visited 改展开栈语义（add→递归→remove，同文件多处引用非环） | ADR-0012 tag 机制保留（YamlDotNet 自定义 tag）；字符串中间嵌入标记不支持（ADR 示例均为整值）；原实现 visited 只增不减（误报环） | `src/Keystone.Config/Interpolation/StaticInterpolator.cs`、`Entries/EntryParser.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-8） |
+| ID-34 | 2026-08-16 | P39 | 事实事件接线形态（DC-11，ADR-0009）：`IFactEvent` 标记接口（TaskId/Capability/Payload/Durable）+ EventBus 构造注入 `IEventStore`——emit 分发**先记录后分发**（观察者异常不丢事实）；durable=true 写失败传播、false 尽力写降级（ADR-0009 决策 3）；事实流：能力域 actor 任务完成/失败（Capability=实例名）+ PluginRuntime 生命周期（经 context 总线，无 context 阶段用外部总线参数）；宿主 EventStore 选项挂根总线（子链共享） | 03 §4 事实事件=emit 分发模式（拦截/策略事件不持久）；先记录后分发保证观察者异常不丢事实；内置事实全 Durable=false（持久化失败不改变主链语义——任务结果已定，不因旁路写失败翻转） | `src/Keystone.Runtime/Events/IFactEvent.cs`、`Facts*.cs`、`EventBus.cs`、`Actors/CapabilityActor.cs`、`Plugins/Lifecycle/PluginRuntime.cs`、`Context/ContextFacade.cs`、`Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-11） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -639,6 +641,18 @@ created: 2026-08-15
 | 2026-08-16 | W38-03 | 宿主接线：KeystoneHostOptions 增 EnvProvider/FileProvider（任一配置即启用）；StartAsync 解析时展开（展开结果进 schema 校验，08 §5） | 实现（TDD） | DC-8；08 §5 | `src/Keystone.Hosting/KeystoneHostOptions.cs`、`KeystoneHost.cs` | `InterpolatedConfigTests`（2） | ✅ |
 | 2026-08-16 | W38-04 | 全量回归 258/258 + Config/Hosting AOT 发布零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` × 2 | ✅ |
 
+### 7.39 P39 文档达标 DC-11：事实事件接入运行链
+
+> 17-doc-compliance-audit DC-11（❌→✅）：IEventStore 孤立，EventBus/PluginRuntime 不写存储。本次接通：IFactEvent 标记 + 任务/生命周期事实 + 宿主 EventStore（ADR-0009/03 §4"任务完成/失败必须存活"兑现）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-16 | W39-01 | `IFactEvent` 标记接口（TaskId/Capability/Payload/Durable）+ 内置事实：TaskCompletedFact/TaskFailedFact/PluginStartedFact/PluginFailedFact（全尽力写） | 实现（TDD） | DC-11；ADR-0009 决策 3；ID-34 | `src/Keystone.Runtime/Events/IFactEvent.cs`、`*Fact.cs` | `FactPersistenceTests`（7） | ✅ |
+| 2026-08-16 | W39-02 | EventBus 构造注入 `IEventStore`：emit 分发先记录后分发；durable 分级（true 写失败传播 / false 尽力写降级）；非事实事件不持久化 | 实现（TDD） | DC-11；ADR-0009 | `src/Keystone.Runtime/Events/EventBus.cs` | 同上（含 FailingStore 降级/传播 2 例） | ✅ |
+| 2026-08-16 | W39-03 | 事实流接线：CapabilityActor 任务完成/失败发布（Capability=实例名；Spawn 可注 eventStore）；PluginRuntime ACTIVE/FAILED/超时发布生命周期事实（经 context 总线，无 context 用外部总线） | 实现（TDD） | DC-11；04 §7 | `Actors/CapabilityActor.cs`、`CapabilityDomain.cs`、`Plugins/Lifecycle/PluginRuntime.cs` | actor 事实 2 例 + `PluginLifecycleFactTests`（1） | ✅ |
+| 2026-08-16 | W39-04 | 宿主/ContextFacade 接线：`KeystoneHostOptions.EventStore` → 根总线携带（子链共享）；ContextFacade 构造可选 eventStore（有父总线共享父的） | 实现（TDD） | DC-11 | `Hosting/KeystoneHostOptions.cs`、`KeystoneHost.cs`、`Context/ContextFacade.cs` | `FactStoreHostTests`（1） | ✅ |
+| 2026-08-16 | W39-05 | 全量回归 266/266 + Runtime AOT 发布零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -740,6 +754,8 @@ created: 2026-08-15
 | ID-32 | 05 §2；09 §3 | `Actors/`（监督策略） | W37-01~02 |
 | W38-01~03 | ID-33 | `Config/Interpolation/StaticInterpolator.cs`、`Config/Entries/EntryParser.cs`、`Hosting/KeystoneHostOptions.cs`、`Hosting/KeystoneHost.cs` | `EntryParserInterpolationTests`（8）+ `InterpolatedConfigTests`（2） |
 | ID-33 | ADR-0012；DC-8 | `Config/Interpolation/`、`Config/Entries/`、`Hosting/` | W38-01~04 |
+| W39-01~04 | ID-34 | `Runtime/Events/IFactEvent.cs`、`*Fact.cs`、`EventBus.cs`、`Actors/CapabilityActor.cs`、`Plugins/Lifecycle/PluginRuntime.cs`、`Hosting/` | `FactPersistenceTests`（7）+ `PluginLifecycleFactTests`（1）+ `FactStoreHostTests`（1） |
+| ID-34 | ADR-0009；DC-11 | `Runtime/Events/`、`Actors/`、`Plugins/Lifecycle/`、`Context/`、`Hosting/` | W39-01~05 |
 
 ## 9. 维护规则
 

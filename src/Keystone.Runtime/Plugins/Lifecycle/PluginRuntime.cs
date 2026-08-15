@@ -21,6 +21,7 @@ public sealed class PluginRuntime : IAsyncDisposable
     private readonly IReadOnlyDictionary<string, object?> _config;
     private readonly TimeSpan _quiesceTimeout;
     private readonly TimeSpan _dependencyTimeout;
+    private readonly Keystone.Runtime.Events.IEventBus? _externalBus;
     private readonly Lock _lock = new();
 
     private PluginLifecycleState _state = PluginLifecycleState.Pending;
@@ -37,7 +38,8 @@ public sealed class PluginRuntime : IAsyncDisposable
         Func<string, IPluginContext> contextFactory,
         IReadOnlyDictionary<string, object?>? config = null,
         TimeSpan? quiesceTimeout = null,
-        TimeSpan? dependencyTimeout = null)
+        TimeSpan? dependencyTimeout = null,
+        Keystone.Runtime.Events.IEventBus? eventBus = null)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(pluginFactory);
@@ -51,6 +53,7 @@ public sealed class PluginRuntime : IAsyncDisposable
         _config = config ?? new Dictionary<string, object?>(StringComparer.Ordinal);
         _quiesceTimeout = quiesceTimeout ?? new KeystoneSettings().QuiesceTimeout;
         _dependencyTimeout = dependencyTimeout ?? new KeystoneSettings().DependencyWaitTimeout;
+        _externalBus = eventBus; // DC-11：无 context 阶段（依赖等待/超时）的生命周期事实出口
 
         // 依赖门控（ADR-0007 决策 3）：依赖消失 → 卸载；依赖重现 → 自动重启（G-C2 re-arm）。
         // 订阅保持整个 runtime 生命周期（StopCoreAsync 不销毁，DisposeAsync 才清理）。
@@ -219,23 +222,9 @@ public sealed class PluginRuntime : IAsyncDisposable
         SetState(PluginLifecycleState.Loading);
         try
         {
-            IPluginContext context;
-            IPlugin plugin;
-            lock (_lock)
-            {
-                _context = _contextFactory(_manifest.Id);
-                context = _context;
-                _plugin = _pluginFactory(context);
-                plugin = _plugin;
-            }
-
-            await plugin.InitializeAsync(context, _config).ConfigureAwait(false);
-            foreach (var service in _manifest.Provides)
-            {
-                _registry.Register(service, _manifest.Id);
-            }
-
+            await InitializePluginAsync().ConfigureAwait(false);
             SetState(PluginLifecycleState.Active);
+            await EmitLifecycleFactAsync(new Keystone.Runtime.Events.PluginStartedFact(_manifest.Id)).ConfigureAwait(false);
             CompleteSettled();
         }
         catch (Exception ex)
@@ -250,7 +239,29 @@ public sealed class PluginRuntime : IAsyncDisposable
             }
 
             SetState(PluginLifecycleState.Failed);
+            await EmitLifecycleFactAsync(
+                new Keystone.Runtime.Events.PluginFailedFact(_manifest.Id, ex.Message)).ConfigureAwait(false);
             CompleteSettled();
+        }
+    }
+
+    /// <summary>LOADING 阶段：创建 context/插件实例 → 初始化 → 注册 provides。</summary>
+    private async Task InitializePluginAsync()
+    {
+        IPluginContext context;
+        IPlugin plugin;
+        lock (_lock)
+        {
+            _context = _contextFactory(_manifest.Id);
+            context = _context;
+            _plugin = _pluginFactory(context);
+            plugin = _plugin;
+        }
+
+        await plugin.InitializeAsync(context, _config).ConfigureAwait(false);
+        foreach (var service in _manifest.Provides)
+        {
+            _registry.Register(service, _manifest.Id);
         }
     }
 
@@ -275,9 +286,21 @@ public sealed class PluginRuntime : IAsyncDisposable
             }
 
             SetState(PluginLifecycleState.Failed);
+            await EmitLifecycleFactAsync(
+                new Keystone.Runtime.Events.PluginFailedFact(_manifest.Id, _error.Message)).ConfigureAwait(false);
             CompleteSettled();
             return false;
         }
+    }
+
+    /// <summary>
+    /// DC-11（ADR-0009/03 §4）：插件生命周期事实——经插件 context 总线（无 context 阶段用外部总线）；
+    /// emit 携带存储时持久化（尽力写）。总线缺失（未配置）= 无事实发布。
+    /// </summary>
+    private Task EmitLifecycleFactAsync<TFact>(TFact fact) where TFact : Keystone.Runtime.Events.IFactEvent
+    {
+        var bus = Context is { } pluginContext ? pluginContext.Context.Events : _externalBus;
+        return bus?.EmitAsync(fact, Context?.Context) ?? Task.CompletedTask;
     }
 
     /// <summary>事件驱动等待依赖（ADR-0007 决策 3：服务可用性事件 → 重新检查，非轮询）。</summary>

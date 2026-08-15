@@ -38,6 +38,12 @@ public sealed class KeystoneHostOptions
     /// </summary>
     public Func<string, string?>? FileProvider { get; set; }
 
+    /// <summary>
+    /// 事实事件存储（DC-11，ADR-0009）：根 context 总线携带——任务完成/失败 + 插件生命周期事实
+    /// 写入 append-only 事件日志；null（默认）= 不持久化。
+    /// </summary>
+    public Keystone.Runtime.Persistence.IEventStore? EventStore { get; set; }
+
     /// <summary>是否启用能力域（01 §2 管理层职责；默认开启，纯生命周期宿主可关闭）。</summary>
     public bool EnableCapabilityDomain { get; set; } = true;
 

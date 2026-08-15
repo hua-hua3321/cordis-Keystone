@@ -19,14 +19,19 @@ public sealed class ContextFacade : IPluginContext, IContext
     private readonly List<IContextInterceptor> _interceptors = [];
     private readonly HashSet<string> _ownedServices = new(StringComparer.Ordinal);
 
-    public ContextFacade(string name, IContext? parent = null, ILoggerFactory? loggerFactory = null)
+    public ContextFacade(
+        string name,
+        IContext? parent = null,
+        ILoggerFactory? loggerFactory = null,
+        Keystone.Runtime.Persistence.IEventStore? eventStore = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         Name = name;
         Parent = parent;
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
         // 事件总线在 context 链间共享（子复用父的实例，对齐 Cordis 单事件系统 + 监听 filter，ID-08）
-        _events = parent?.Events is EventBus parentBus ? parentBus : new EventBus();
+        // DC-11：新建总线携带事实持久化存储（有父总线时以父总线的 store 为准）
+        _events = parent?.Events is EventBus parentBus ? parentBus : new EventBus(eventStore);
     }
 
     public string Name { get; }

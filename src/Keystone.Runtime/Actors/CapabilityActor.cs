@@ -28,15 +28,21 @@ internal sealed class CapabilityActor : IActor
         string instanceName,
         Func<TaskEnvelope, Task<TaskResultEnvelope>> handler,
         IReadOnlyList<IMiddleware>? middlewares = null,
-        Keystone.Runtime.Context.IContext? parentContext = null)
+        Keystone.Runtime.Context.IContext? parentContext = null,
+        Keystone.Runtime.Persistence.IEventStore? eventStore = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
         ArgumentNullException.ThrowIfNull(handler);
         _handler = handler;
         _middlewares = middlewares ?? [];
+        InstanceName = instanceName;
         // 01 §4：每实例独立持久 context（父 = 宿主 root，接入插件服务链 + 共享事件总线 ID-08）
-        _instanceContext = new ContextFacade(instanceName, parentContext);
+        // DC-11：独立实例的总线携带事实存储（有父总线时共享父的）
+        _instanceContext = new ContextFacade(instanceName, parentContext, eventStore: eventStore);
     }
+
+    /// <summary>实例名（事实事件 Capability 维度）。</summary>
+    internal string InstanceName { get; }
 
     /// <summary>实例级 context（01 §4：actor=context 同生命周期；测试/诊断/宿主可访问）。</summary>
     internal ContextFacade InstanceContext => _instanceContext;
@@ -48,10 +54,19 @@ internal sealed class CapabilityActor : IActor
         {
             case DomainRequest { Envelope: var envelope }:
                 var result = await ExecuteAsync(envelope).ConfigureAwait(false);
+                await PublishFactAsync(envelope, result).ConfigureAwait(false); // DC-11：任务完成/失败事实
                 context.Respond(new DomainResponse(result));
                 break;
         }
     }
+
+    /// <summary>DC-11（04 §7/03 §4）：任务结果事实——emit 经实例总线（携带存储时持久化，尽力写）。</summary>
+    private Task PublishFactAsync(TaskEnvelope envelope, TaskResultEnvelope result)
+        => result.Succeeded
+            ? _instanceContext.Events.EmitAsync(
+                new Keystone.Runtime.Events.TaskCompletedFact(envelope.TaskId, InstanceName), _instanceContext)
+            : _instanceContext.Events.EmitAsync(
+                new Keystone.Runtime.Events.TaskFailedFact(envelope.TaskId, InstanceName, result.ErrorCode), _instanceContext);
 
     /// <summary>经中间件管道执行跨域请求（无中间件时直接调 handler——兼容原语义）。</summary>
     private async Task<TaskResultEnvelope> ExecuteAsync(TaskEnvelope envelope)
