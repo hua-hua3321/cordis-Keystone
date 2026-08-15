@@ -62,6 +62,7 @@ created: 2026-08-15
 | P32 差距 G-C11 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 日志级别默认阈值（§7.32：三级过滤对齐 Cordis levels，236/236 全绿） | §7.32 |
 | P33 多实例集成 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 宿主级多实例集成测试（§7.33：插件组多实例并行/隔离/管道独立/TaskId/事件，237/237 全绿） | §7.33 |
 | P34 文档达标 DC-1 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 实例级持久 context（§7.34：01 §4 actor 持 context 兑现，238/238 全绿） | §7.34 |
+| P35 文档达标 DC-3/DC-6 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | quiesce 入口拒绝+超时审计 + rebind 报错+热重载顺序（§7.35，244/244 全绿） | §7.35 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -137,6 +138,7 @@ created: 2026-08-15
 | ID-27 | 2026-08-15 | P31 | 热更新 API（G-C8）：`ReloadPluginAsync`（冷重启：重编译 + 新 ALC）+ `UpdatePluginAsync`（热更新：config 变 → PatchContext 瀑布可否决 → 重载）；FileSystemWatcher 由嵌入方经 ConfigUpdate 事件接线 | 兑现 09 §5 ReloadPlugin/UpdatePlugin + 08 §6.1 变更分级；宿主用 YAML 字符串启动无文件源，watcher 不内置 | `src/Keystone.Hosting/KeystoneHost.cs` | 否（16-cordis-gap-review G-C8 备注） |
 | ID-28 | 2026-08-15 | P32 | 日志级别默认阈值（G-C11）：RingBufferLoggerProvider 三级过滤——按 category 覆盖 → defaultLevel → 全局默认 Information；IsEnabled 无 override 不再恒 true | 对齐 Cordis levels[name] ?? levels.default ?? INFO（logger.ts:155）；Debug 日志默认被过滤（真实语义缺陷修复） | `src/Keystone.Runtime/Logging/RingBufferLoggerProvider.cs` | 否（16-cordis-gap-review G-C11 备注） |
 | ID-29 | 2026-08-15 | P34 | 实例级持久 context（DC-1）：CapabilityActor 构造时创建实例 context（父 = parentContext 可选），跨请求复用；中间件/请求在实例 context 上执行 | 01 §3/§4"actor=context 同生命周期"兑现；此前每请求新建 context 状态丢失；父链接入插件服务解析 + 共享事件总线（03 §2） | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | 否（17-doc-compliance-audit DC-1） |
+| ID-30 | 2026-08-15 | P35 | 文档达标 DC-3/DC-6：①全局 quiesce 补入口拒绝 + 总超时 + 未收敛审计（09 §4）；②rebind 重复注册报错 + 热重载先卸载再启动（02 §3/ADR-0007） | 兑现 09 §4 六步关闭语义与 rebind 语义；热重载顺序修复防同名注册冲突/误删 | `KeystoneHost`、`KeystoneHostOptions`、`ServiceRegistry`、`PluginLoader` | 否（17-doc-compliance-audit DC-3/DC-6） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -588,6 +590,16 @@ created: 2026-08-15
 | 2026-08-15 | W34-02 | **DC-1 修复**：CapabilityActor 持实例级持久 context（构造时创建，跨请求复用；父 = parentContext 可选）；中间件/请求在实例 context 上执行（接入父链服务解析 + 共享事件总线） | 实现（TDD） | 01 §3/§4；03 §2 | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | `Instance_context_is_persistent_across_requests`（中间件经 ctx 跨 3 请求累积=3） | ✅ |
 | 2026-08-15 | W34-03 | 全量回归 238/238 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.35 P35 文档达标 DC-3/DC-6
+
+> 17-doc-compliance-audit P0 项：DC-3（09 §4 全局 quiesce：入口拒绝 + 超时审计 + 停监督）与 DC-6（02 §3 rebind=报错 + 热重载注册保持）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W35-01 | DC-3：KeystoneHost.ShutdownAsync 补入口拒绝（CreateEntry/Mount/Reload/Update 检查 _shutdown）+ 总关闭超时（ShutdownTimeout 默认 30s）+ 未收敛插件审计（UncollectedPlugins） | 实现（TDD） | 09 §4；ADR-0005 | `src/Keystone.Hosting/KeystoneHost.cs`、`KeystoneHostOptions.cs` | `ShutdownGateTests`（3） | ✅ |
+| 2026-08-15 | W35-02 | DC-6：ServiceRegistry.Register 重复（他属主）→ 报错（rebind 语义）；IsAvailable 加锁；ReloadPluginAsync/PluginLoader.ReloadAsync 改**先卸载旧再启动新**（避免同名注册冲突/误删） | 实现（TDD） | 02 §3；ADR-0007 | `src/Keystone.Runtime/Plugins/Services/ServiceRegistry.cs`、`Loading/PluginLoader.cs`、`KeystoneHost.cs` | `RebindAndReloadTests`（3） | ✅ |
+| 2026-08-15 | W35-03 | 全量回归 244/244 + Runtime/Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` × 2 | ✅ |
+
 > **审计发现**：30 项差距集中在"功能实现了但未按文档接线/语义简化"（quiesce 五步缺拒绝/排空、监督缺失、超时熔断死代码、分层叠加孤立、静态插值死代码、事件持久化孤立、管道无原子替换等）——见 17-doc-compliance-audit.md（待产出）。
 
 ## 8. 回溯索引（三向映射）
@@ -682,6 +694,9 @@ created: 2026-08-15
 | W34-01 | — | 17-doc-compliance-audit.md（30 项差距） | 审计闭环 |
 | W34-02 | ID-29 | `Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | 持久 context 测试绿 |
 | ID-29 | 01 §3/§4 | `Actors/`（实例 context） | W34-02 |
+| W35-01 | ID-30 | `Hosting/KeystoneHost.cs`、`KeystoneHostOptions.cs` | `ShutdownGateTests`（3） |
+| W35-02 | ID-30 | `Services/ServiceRegistry.cs`、`Loading/PluginLoader.cs` | `RebindAndReloadTests`（3） |
+| ID-30 | 09 §4；02 §3 | `Hosting/`、`Runtime/Plugins/` | W35-01~03 |
 
 ## 9. 维护规则
 

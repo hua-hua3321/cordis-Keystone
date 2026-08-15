@@ -31,4 +31,7 @@ public sealed class KeystoneHostOptions
 
     /// <summary>能力域名称（默认 "keystone"；多宿主嵌入场景可区分）。</summary>
     public string CapabilityDomainName { get; set; } = "keystone";
+
+    /// <summary>全局关闭超时（09 §4 第 6 步：超时强制退出 + 记录未收敛插件；默认 30s）。</summary>
+    public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 }

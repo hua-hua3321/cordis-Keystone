@@ -65,12 +65,14 @@ public sealed class PluginLoader : IAsyncDisposable
 
         var oldRuntime = _runtime;
         var oldAlc = _alc;
-        await LoadSourceAsync(source).ConfigureAwait(false);
 
+        // DC-6：先卸载旧实例（摘注册释放 provides）再加载新——避免同名注册 rebind 冲突
         if (oldRuntime is not null)
         {
             await oldRuntime.StopAsync().ConfigureAwait(false); // quiesce 1-4 步（effect 收敛 + 插件 dispose + 摘注册）
         }
+
+        await LoadSourceAsync(source).ConfigureAwait(false);
 
         _unloadedAlc = new WeakReference(oldAlc);
         oldAlc.Unload(); // 第 ⑤ 步：收敛后才 Unload

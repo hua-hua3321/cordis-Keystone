@@ -1,3 +1,5 @@
+using Keystone.Core.Errors;
+
 namespace Keystone.Runtime.Plugins.Services;
 
 /// <summary>服务注册表实现（线程安全；事件驱动门控重评）。</summary>
@@ -19,7 +21,13 @@ public sealed class ServiceRegistry : IServiceRegistry
         }
     }
 
-    public bool IsAvailable(string serviceName) => _providers.ContainsKey(serviceName);
+    public bool IsAvailable(string serviceName)
+    {
+        lock (_lock)
+        {
+            return _providers.ContainsKey(serviceName);
+        }
+    }
 
     public void Register(string serviceName, string providerId)
     {
@@ -29,6 +37,15 @@ public sealed class ServiceRegistry : IServiceRegistry
         var changed = false;
         lock (_lock)
         {
+            // DC-6（02 §3 / ADR-0007）：同 scope 重复注册 = 报错（rebind 语义，禁止静默覆盖）
+            if (_providers.TryGetValue(serviceName, out var existing)
+                && !string.Equals(existing, providerId, StringComparison.Ordinal))
+            {
+                throw new KeystoneException(
+                    ErrorCode.ServiceAlreadyRegistered,
+                    $"service '{serviceName}' has been registered by '{existing}'");
+            }
+
             changed = _providers.TryAdd(serviceName, providerId);
         }
 

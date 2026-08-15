@@ -24,6 +24,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     private readonly HashSet<string> _failedEntries = new(StringComparer.Ordinal);
     private ContextFacade? _rootContext;
     private CapabilityDomain? _capabilityDomain;
+    private IReadOnlyList<string> _uncollectedPlugins = [];
     private bool _shutdown;
 
     public KeystoneHost(KeystoneHostOptions options)
@@ -84,20 +85,58 @@ public sealed class KeystoneHost : IAsyncDisposable
             return;
         }
 
+        // DC-3（09 §4）：① 入口拒绝（后续 CreateEntry/Mount/Reload 直接拒绝）
         _shutdown = true;
-        foreach (var plugin in _plugins.ToList())
+
+        // ② 逐插件 quiesce（ADR-0005 五步闸门），带总关闭超时 + 未收敛审计（09 §4 第 6 步）
+        var uncollected = new List<string>();
+        using var cts = new CancellationTokenSource(_options.ShutdownTimeout);
+        var tasks = _plugins.Select(async plugin =>
         {
-            await plugin.Loader.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await plugin.Loader.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                uncollected.Add(plugin.EntryId); // 超时未收敛 → 记录（可观测性审计）
+            }
+        }).ToList();
+        try
+        {
+            await Task.WhenAll(tasks).WaitAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // 总超时强制退出：记录全部未收敛插件
+            uncollected.AddRange(_plugins.Select(p => p.EntryId));
+        }
+
+        if (uncollected.Count > 0)
+        {
+            _uncollectedPlugins = [.. uncollected];
         }
 
         _plugins.Clear();
         _tree.Clear();
         _failedEntries.Clear();
 
+        // ③ 停能力域监督树（不再重启，防关闭期"复活"，09 §4 第 4 步）
         if (_capabilityDomain is not null)
         {
             await _capabilityDomain.DisposeAsync().ConfigureAwait(false);
             _capabilityDomain = null;
+        }
+    }
+
+    /// <summary>关闭超时未收敛的插件（诊断审计，09 §4 第 6 步）。</summary>
+    public IReadOnlyList<string> UncollectedPlugins => _uncollectedPlugins;
+
+    private void ThrowIfShuttingDown()
+    {
+        if (_shutdown)
+        {
+            throw new KeystoneException(ErrorCode.LifecycleInvalidState, "host is shutting down");
         }
     }
 
@@ -118,6 +157,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// <summary>创建条目（加载插件；返回 id；支持 parent 组）。CRUD 返回前插件已就绪（await 收敛）。</summary>
     public async Task<string> CreateEntryAsync(EntryOptions options, string? parent = null)
     {
+        ThrowIfShuttingDown();
         ArgumentNullException.ThrowIfNull(options);
 
         var id = options.Id ?? Guid.NewGuid().ToString("N");
@@ -223,6 +263,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// <summary>编程式挂载（H2 端到端）：挂载 → 门控 → 运行；经 RemoveEntryAsync 卸载。</summary>
     public async Task MountAsync(PluginSource source, PluginManifest manifest)
     {
+        ThrowIfShuttingDown();
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(manifest);
 
@@ -240,6 +281,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// </summary>
     public async Task ReloadPluginAsync(string id)
     {
+        ThrowIfShuttingDown();
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
         var entry = FindEntry(_tree, id)
@@ -248,15 +290,17 @@ public sealed class KeystoneHost : IAsyncDisposable
         var source = _options.SourceProvider(entry);
         var config = await ResolvePluginConfigAsync(entry).ConfigureAwait(false);
 
-        var loader = await PluginLoader.CreateAsync(
-            source, manifest, _registry, ctxId => new ContextFacade(ctxId, _rootContext), config).ConfigureAwait(false);
-
+        // DC-6：先卸载旧实例（Unregister 释放 provides 注册）再启动新——避免同名注册冲突
+        // （原顺序先启动新会因 Register rebind 报错或误删新注册）
         var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
         if (hosted is not null)
         {
             await hosted.Loader.DisposeAsync().ConfigureAwait(false);
             _plugins.Remove(hosted);
         }
+
+        var loader = await PluginLoader.CreateAsync(
+            source, manifest, _registry, ctxId => new ContextFacade(ctxId, _rootContext), config).ConfigureAwait(false);
 
         _plugins.Add(new HostedPlugin(id, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(entry));
@@ -269,6 +313,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// </summary>
     public async Task UpdatePluginAsync(string id, object? newConfig)
     {
+        ThrowIfShuttingDown();
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
         var entry = FindEntry(_tree, id)
