@@ -39,6 +39,14 @@ public interface IEventBus
     /// <summary>bail：同步按序，首个非 null 返回值短路。</summary>
     object? PublishBail<TEvent>(TEvent e, IContext? publisher = null);
 
-    /// <summary>waterfall：包裹 next 链执行；监听者不调 next 即否决。</summary>
-    Task PublishWaterfallAsync<TEvent>(TEvent e, IContext? publisher = null, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// waterfall：包裹 next 链执行；监听者不调 next 即否决。
+    /// <paramref name="terminal"/> = 发布者注入的内置行为（最内层 next，可被否决；缺省空操作），
+    /// G-C6：返回 terminal 执行结果（Cordis waterfall 返回值语义）。
+    /// </summary>
+    Task<object?> PublishWaterfallAsync<TEvent>(
+        TEvent e,
+        IContext? publisher = null,
+        Func<Task<object?>>? terminal = null,
+        CancellationToken cancellationToken = default);
 }

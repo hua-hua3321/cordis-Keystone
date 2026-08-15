@@ -122,10 +122,19 @@ public sealed class EventBus : IEventBus
         return null;
     }
 
-    public async Task PublishWaterfallAsync<TEvent>(TEvent e, IContext? publisher = null, CancellationToken cancellationToken = default)
+    public async Task<object?> PublishWaterfallAsync<TEvent>(
+        TEvent e,
+        IContext? publisher = null,
+        Func<Task<object?>>? terminal = null,
+        CancellationToken cancellationToken = default)
     {
-        // 反向包装 next 链：最后一个监听者的 next = terminal；与管道组合同构（04 §2 形状 B）
-        Func<Task> next = () => Task.CompletedTask;
+        // G-C6：terminal = 发布者注入的内置行为（最内层 next，可被否决）；缺省空操作。
+        // 结果经 next 链回传：最外层调用者得到 terminal 执行结果（Cordis waterfall 返回值）。
+        Func<Task<object?>> inner = terminal ?? (() => Task.FromResult<object?>(null));
+
+        // 反向包装 next 链：最后一个监听者的 next = inner；与管道组合同构（04 §2 形状 B）
+        // 监听器 next 是 Func<Task>（不返回值）——链值经 TCS 捕获回传
+        Func<Task<object?>> next = inner;
         var entries = Snapshot<TEvent>(DispatchMode.Waterfall);
         for (var i = entries.Count - 1; i >= 0; i--)
         {
@@ -137,11 +146,24 @@ public sealed class EventBus : IEventBus
 
             MarkOnce(entry);
             var captured = entry;
-            var inner = next;
-            next = () => ((WaterfallHandler<TEvent>)captured.Handler)(e, inner, cancellationToken);
+            var capturedNext = next;
+            next = async () =>
+            {
+                var capture = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var handler = (WaterfallHandler<TEvent>)captured.Handler;
+                var listenerTask = handler(e, () => AwaitChain(capturedNext, capture), cancellationToken);
+                await listenerTask.ConfigureAwait(false);
+                // 监听器不调 next → 否决（capture 未完成，返回 null）；调了 → 回传链值
+                return capture.Task.IsCompleted ? await capture.Task.ConfigureAwait(false) : null;
+            };
         }
 
-        await next().ConfigureAwait(false);
+        return await next().ConfigureAwait(false);
+    }
+
+    private static async Task AwaitChain(Func<Task<object?>> next, TaskCompletionSource<object?> capture)
+    {
+        capture.TrySetResult(await next().ConfigureAwait(false));
     }
 
     private Subscription Register(Type eventType, Delegate handler, DispatchMode mode, EventSubscriptionOptions? options)
