@@ -146,8 +146,8 @@ FileSystemWatcher 监听插件源文件
 - Roslyn 内存编译默认调试器进不去 → Emit 时带 embedded PDB + source link
 - 否则插件代码是黑盒，出 bug 只能靠日志
 
-## 10. 待定
+## 10. 已决决策（ADR-0001/0002）
 
-- 安全边界：插件可信代码（同进程）vs 隔离进程
-- 插件来源：本地 vs 远程分发（签名/版本管理）
-- AOT 冲突：Roslyn 动态编译与 NativeAOT 互斥（二选一或插件独立进程）
+- **安全边界**：插件作为同进程可信代码执行（默认），信任边界 = 用户；预留 `IPluginHost` 扩展点支持未来进程隔离（ADR-0001）
+- **插件来源**：本地文件（初始），manifest 记录版本；演进路径 = 本地+版本记录 → 本地+签名校验 → `IPluginSource` 抽象引入远程分发（ADR-0001）
+- **AOT vs JIT**：JIT 运行时 + Roslyn 动态编译（热重载完整），不采用 NativeAOT；未来 AOT 走插件独立进程路线（ADR-0002）

@@ -68,7 +68,7 @@ public sealed record FsReadRequest(Guid TaskId, string Path, CancellationToken C
 - 能力域接口白名单（宿主定义）约束 Payload 类型
 - 插件只处理本能力域的 Operation，未知 Operation → 错误
 
-## 6. 待定
+## 6. 已决决策（ADR-0004）
 
-- Payload 强类型 vs 动态（MessagePack/JSON）——跨进程边界时需要序列化
-- 多能力域编排：一个任务跨多个域时，TaskId 传递与子任务模型
+- **Payload**：域内强类型 record（编译期类型安全）；跨域边界显式序列化契约（MessagePack 默认 / JSON 可配置），在契约接口上声明（ADR-0004）
+- **跨域编排**：TaskId 贯穿（子任务携带 ParentTaskId）+ 子任务全等聚合（fan-out/fan-in，全部成功才成功，任一失败父任务失败，取消级联传播）（ADR-0004）

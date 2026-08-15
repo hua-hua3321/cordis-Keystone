@@ -103,7 +103,7 @@ ctx.Events.Publish(new TaskCompleted(id, result));
 | 插件注册 | 短命 | 插件 dispose 时按 ID 回收 |
 | 事件监听 | 随插件 | 插件 dispose 时自动摘除 |
 
-## 8. 待定
+## 8. 已决决策（ADR-0003）
 
-- context 并发模型：串行（actor 消息循环天然安全，吞吐受限）vs 并行（需同步）
-- 共享事件的父 scope 归属：哪些事件全局共享（遥测/日志）需要显式配置
+- **context 并发模型**：actor 串行处理（默认）——消息循环天然无竞争，context 状态免费安全；高吞吐域可显式声明 `concurrency: parallel` 由管理层扩展（ADR-0003）
+- **共享事件父 scope**：需要全局共享的事件（遥测/日志）挂公共父 scope，在配置层显式声明

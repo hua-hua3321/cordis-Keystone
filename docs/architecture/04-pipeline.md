@@ -107,7 +107,7 @@ ctx.Events.Subscribe<TaskCompleted>(static e => telemetry.RecordEnd(e.TaskId, e.
 - 拦截事件：waterfall（管道即此类）
 - 策略事件：parallel/emit（观察者）
 
-## 8. 待定
+## 8. 已决决策（ADR-0003/0004）
 
-- 管道配置热更新：配置变 → 重建管道？保留 actor/context？（与插件热重载不同维度）
-- 管道节点粒度：一个插件一个节点，还是一个插件可贡献多个节点？
+- **管道配置热更新**：原子替换（swap）——配置变更 → 基于当前 context 构建新管道实例 → 原子切换引用 → 旧管道在途请求排空后销毁；保留 actor/context，只换管道链（ADR-0003）
+- **管道节点粒度**：一个插件 = 一个中间件节点（单节点），复杂能力通过组合多个插件实现
