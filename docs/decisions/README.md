@@ -14,6 +14,7 @@ created: 2026-08-15
 | [adr-0002-aot-vs-jit.md](adr-0002-aot-vs-jit.md) | AOT vs JIT（JIT + Roslyn 动态编译，不采用 NativeAOT） | accepted | 2026-08-15 |
 | [adr-0003-context-concurrency-pipeline-hot-reload.md](adr-0003-context-concurrency-pipeline-hot-reload.md) | context 并发模型（串行默认）+ 管道配置热更新（原子替换） | accepted | 2026-08-15 |
 | [adr-0004-message-contracts.md](adr-0004-message-contracts.md) | 消息契约（Payload 强类型 + 显式序列化）+ 跨域编排（TaskId 贯穿 + 全等聚合） | accepted | 2026-08-15 |
+| [adr-0005-plugin-lifecycle-quiesce.md](adr-0005-plugin-lifecycle-quiesce.md) | 插件生命周期状态机 + quiesce 收敛协议（差距 G1/G2/G3） | accepted | 2026-08-15 |
 
 ## 约定
 

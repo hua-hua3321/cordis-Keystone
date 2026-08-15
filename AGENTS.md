@@ -44,7 +44,7 @@ C# 版 Cordis 插件框架：配置驱动、多实例隔离、热重载、中间
 | [architecture/05-reliability.md](architecture/05-reliability.md) | 可靠性：错误处理、监督策略、超时熔断、可观测性 | 标准 |
 | [architecture/06-contracts.md](architecture/06-contracts.md) | 消息契约：请求模型、请求 ID、链路追踪 | 标准 |
 | [architecture/07-cordis-migration-gap.md](architecture/07-cordis-migration-gap.md) | Cordis 迁移差距：7 必查项结论 + 差距清单/优先级/影响 | 标准 |
-| [decisions/](decisions/README.md) | 决策记录（ADR-0001 ~ 0004，设计期已收敛） | accepted |
+| [decisions/](decisions/README.md) | 决策记录（ADR-0001 ~ 0005，设计期已收敛） | accepted |
 
 ## 治理
 

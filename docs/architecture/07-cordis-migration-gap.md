@@ -287,7 +287,7 @@ created: 2026-08-15
 - 06-contracts.md：§2（判断口诀修订，若采纳方案 A）
 
 **ADR 候选**（新决策落地前写 ADR，见 decisions/README.md）：
-- ADR-0005：插件生命周期状态机 + quiesce 收敛协议（G1/G2/G3）
+- ✅ ADR-0005：插件生命周期状态机 + quiesce 收敛协议（G1/G2/G3）——**已落地**（`docs/decisions/adr-0005-plugin-lifecycle-quiesce.md`，accepted）
 - ADR-0006：事件分发模式全集（serial/bail 纳入 or 弃用声明）（G10）
 - ADR-0007（可能）：依赖门控激活与 manifest 服务级依赖（G5/G13）——若 G5 纳入第一版
 
