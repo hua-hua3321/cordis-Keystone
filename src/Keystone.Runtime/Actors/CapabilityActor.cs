@@ -30,6 +30,11 @@ internal sealed class CapabilityActor : IActor
     private TaskEnvelope? _currentEnvelope;
     private TaskResultEnvelope? _currentResult;
 
+    // DC-13（06 §4 幂等契约）：TaskId 即幂等键——重复投递/重试返回缓存结果（不重执行副作用）
+    private const int ResultCacheCapacity = 1024;
+    private readonly Dictionary<Guid, TaskResultEnvelope> _results = [];
+    private readonly Queue<Guid> _resultOrder = new();
+
     public CapabilityActor(
         string instanceName,
         Func<TaskEnvelope, Task<TaskResultEnvelope>> handler,
@@ -60,7 +65,15 @@ internal sealed class CapabilityActor : IActor
         switch (context.Message)
         {
             case DomainRequest { Envelope: var envelope }:
-                var result = await ExecuteAsync(envelope).ConfigureAwait(false);
+                // DC-13：幂等去重——重复 TaskId 直接回缓存（不重执行、不重发事实）
+                if (_results.TryGetValue(envelope.TaskId, out var cached))
+                {
+                    context.Respond(new DomainResponse(cached));
+                    break;
+                }
+
+                var result = await ExecuteTracedAsync(envelope).ConfigureAwait(false);
+                RecordResult(envelope.TaskId, result);
                 await PublishFactAsync(envelope, result).ConfigureAwait(false); // DC-11：任务完成/失败事实
                 context.Respond(new DomainResponse(result));
                 break;
@@ -96,6 +109,42 @@ internal sealed class CapabilityActor : IActor
         });
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// DC-13（05 §5/06 §3）：请求执行包裹 keystone.task Activity——TaskId/ParentTaskId/能力域/操作
+    /// tag 贯穿（中间件/服务内读 Activity.Current 即得，H1）；结束恢复前序 Activity。
+    /// </summary>
+    private async Task<TaskResultEnvelope> ExecuteTracedAsync(TaskEnvelope envelope)
+    {
+        var activity = Keystone.Runtime.Trace.TraceContext.StartTask(
+            new TaskId(envelope.TaskId),
+            envelope.Capability ?? "unknown",
+            envelope.Operation ?? "unknown",
+            envelope.ParentTaskId is { } parent ? new TaskId(parent) : null);
+        try
+        {
+            return await ExecuteAsync(envelope).ConfigureAwait(false);
+        }
+        finally
+        {
+            activity.Dispose();
+        }
+    }
+
+    /// <summary>DC-13：结果缓存（FIFO 容量上限，防无界增长）。</summary>
+    private void RecordResult(Guid taskId, TaskResultEnvelope result)
+    {
+        if (_results.Count >= ResultCacheCapacity && _results.ContainsKey(taskId) is false)
+        {
+            var oldest = _resultOrder.Dequeue();
+            _results.Remove(oldest);
+        }
+
+        if (_results.TryAdd(taskId, result))
+        {
+            _resultOrder.Enqueue(taskId);
+        }
     }
 
     /// <summary>经管道执行跨域请求（DC-10：缓存管道；无中间件直通——兼容原语义）。</summary>
