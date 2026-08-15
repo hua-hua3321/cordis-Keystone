@@ -78,11 +78,22 @@
 > 标注 `<!-- @publish -->` 的表示愿意共享到中央库（scan 会收集）；
 > 不标注的默认为 `@local`（仅本项目）。
 
-### <!-- 规则名称 -->
+### 规则 0：AOT 就绪编码标准（最高优先级，先于一切规则）
 
-<!-- @publish --><!-- 或 @local（默认，可省略） -->
+<!-- @publish -->
 <!--
-触发条件：什么场景下触发
-约束动作：必须做什么 / 禁止做什么
-为什么有效：跨项目通用的工程理由（@publish 时必填，说明为何值得共享）
+触发条件：本项目任何 C# 代码编写/审查/提交
+约束动作：即使当前不采用 NativeAOT（ADR-0002：JIT + Roslyn 动态编译），所有代码必须按 AOT 兼容标准编写——
+  1) 禁止 Reflection.Emit / Expression.Compile / 运行时动态程序集（Roslyn 插件编译层是唯一刻意例外）
+  2) 反射动态加载仅限插件加载层，业务代码禁止运行时反射（改用 Source Generator / 编译期已知类型）
+  3) 序列化显式（[MessagePackObject]/[JsonSerializable]），不依赖运行时反射序列化
+  4) 禁止 CSharpScript / CodeDom / Assembly.Load(byte[]) 于宿主路径
+  5) IOptions 配置绑定用编译期泛型，不写反射式绑定
+  6) 规避 AOT 不兼容 API（BinaryFormatter / Type.GetType(string) 运行时解析等）
+  7) 裁剪告警（ILLink/rd.xml）视为构建错误处理
+  验证：提交前跑 `dotnet publish -c Release -r <rid> --self-contained /p:PublishAot=true` 冒烟，或 `dotnet build -warnaserror` 无裁剪警告
+为什么有效：AOT 兼容是单向约束——从 JIT 迁 AOT 成本极高（反射/动态生成/序列化全要重写），从 AOT 标准写 JIT 代码零成本。写码时守 AOT 标准 = 后期切换零改动。跨项目通用：任何"当前不 AOT 但未来可能"的 .NET 项目都应遵守。
 -->
+
+**本项目当前不采用 NativeAOT（ADR-0002），但所有代码必须按 AOT 兼容标准编写**——后期切换 AOT 零改动直接可用。完整约束见 AGENTS.md 规则 0。唯一例外：插件加载层（Roslyn 内存编译 + 独立 ALC，ADR-0002/ADR-0001）。
+
