@@ -9,7 +9,7 @@ created: 2026-08-15
 > 触发：用户指出"要根据文档里面的要求来做"，P33 暴露实现是文档的近似而非要求（如 01 §4 每实例持久 context 被简化为每请求新建）。
 > 方法：workflow 并行 5 子代理，逐项对照架构文档（00-16）与 ADR-0001~0015 的**可验证承诺** vs 当前实现。
 > 结果：30 项差距（5 域 × 6，全 ⚠️/❌），集中在"功能实现了但未按文档接线/语义简化"。
-> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 四项全部修复（DC-8 P38 / DC-11 P39 / DC-10 P40 / DC-7 P41）；P2 推进中：DC-16 ✅（P42）/ DC-20 ✅（P43）/ DC-13 ✅（P44）/ DC-15 ✅（P45）/ DC-17 ✅（P46）/ DC-18 ✅（P47）/ DC-19 ✅（P48）/ DC-14 ✅（P49）**；其余按 §4 计划排期（剩 DC-9 文件 watcher）。
+> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 四项全部修复（DC-8 P38 / DC-11 P39 / DC-10 P40 / DC-7 P41）；P2 全部修复：DC-16 ✅（P42）/ DC-20 ✅（P43）/ DC-13 ✅（P44）/ DC-15 ✅（P45）/ DC-17 ✅（P46）/ DC-18 ✅（P47）/ DC-19 ✅（P48）/ DC-14 ✅（P49）/ DC-9 ✅（P50）**。
 
 ## 1. 审计方法
 
@@ -31,7 +31,7 @@ created: 2026-08-15
 | DC-6 | 02 §3、ADR-0007 | rebind=报错 + 热重载服务保持 | **✅ 已修复（P35）**：Register 重复（他属主）报错；热重载先卸载再启动 | ✅ |
 | DC-7 | 08 §4 | 配置分层叠加（base/profile/patch/overlay + 环境选择） | **✅ 已修复（P41）**：`StartAsync(IReadOnlyList<string>)` 多层按序叠加（逐层解析含插值 → EntryTree.ApplyLayers）；单层重载保持原语义 | ✅ |
 | DC-8 | ADR-0012 | !!env/!!file 静态插值（YAML tag 语法 + 无环检测 + 展开后校验） | **✅ 已修复（P38）**：EntryParser 接 StaticInterpolator（!!env NAME/!!file path tag 展开，缺失保留标记，visited 环检测跨整次解析）；宿主 EnvProvider/FileProvider 注入（展开后进 schema 校验） | ✅ |
-| DC-9 | 08 §6 | 文件变更→重载→diff→逐条目更新 + 写回管线 | 无配置 watcher/diff；热更新退化为 API 调用 | ⚠️ |
+| DC-9 | 08 §6 | 文件变更→重载→diff→逐条目更新 + 写回管线 | **✅ 已修复（P50）**：ConfigDiffer（按条目 id：新增/移除/仅 config 变/结构变/disabled 翻转——08 §6.1 分级）；ApplyConfigAsync 编排（apply 串行化 + 逐条目路由既有动作 + ConfigReloaded 事件）；ConfigFileWatcher（防抖合并 → 重读 → 应用，失败保留旧树）+ EnableConfigWatch 宿主接线 | ✅ |
 | DC-10 | 04 §8、ADR-0003 | 管道原子替换（swap）+ 在途排空 + 保留 actor/context | **✅ 已修复（P40）**：管道实例化缓存（构建一次跨请求复用）+ SwapPipelineAsync 原子换引用（保留 actor/context；串行循环内在途走旧链） | ✅ |
 | DC-11 | ADR-0009 | 事实事件持久化接入运行链 | **✅ 已修复（P39）**：IFactEvent 标记（emit 分发持久化，durable 分级）+ 任务完成/失败事实（能力域 actor）+ 插件生命周期事实（PluginRuntime）+ 宿主 EventStore 选项（根总线携带） | ✅ |
 | DC-12 | 03 §1/§7 | actor=context 同生命周期，状态跨请求驻留 | 每请求新建 context（DC-1 修复前） | ✅ 随 DC-1 |

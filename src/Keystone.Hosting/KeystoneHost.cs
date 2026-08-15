@@ -25,6 +25,8 @@ public sealed class KeystoneHost : IAsyncDisposable
     private ContextFacade? _rootContext;
     private Keystone.Config.Persistence.ConfigFileWriter? _configWriter; // DC-15：CRUD 落盘写回
     private Keystone.Runtime.Persistence.FactRetentionScheduler? _retention; // DC-18：定时 Prune
+    private ConfigFileWatcher? _configWatcher; // DC-9：配置文件监听
+    private volatile bool _applyingConfig; // DC-9：apply 串行化（watcher 首扫与初始化防竞态交错）
     private CapabilityDomain? _capabilityDomain;
     private IReadOnlyList<string> _uncollectedPlugins = [];
     private bool _shutdown;
@@ -398,6 +400,105 @@ public sealed class KeystoneHost : IAsyncDisposable
         }).ConfigureAwait(false);
     }
 
+    // ── DC-9：文件变更 → 重载 → diff → 逐条目更新（08 §6 触发管线）──
+
+    /// <summary>配置重载完成（diff 后；负载 = 变更条目 id 集）。</summary>
+    public event EventHandler<ConfigReloadedEventArgs>? ConfigReloaded;
+
+    /// <summary>条目热更新前（仅 config 变路径，08 §6.1）。</summary>
+    public event EventHandler<PluginUpdatingEventArgs>? PluginUpdating;
+
+    /// <summary>条目冷重启前（name/inject/isolate 变路径，08 §6.1）。</summary>
+    public event EventHandler<PluginReloadingEventArgs>? PluginReloading;
+
+    /// <summary>
+    /// 应用新配置树（DC-9，08 §6 管线）：diff（按条目 id）→ 按 §6.1 分级逐条目执行——
+    /// 新增 → 加载；移除 → 卸载；仅 config 变 → 热更新（UpdatePluginAsync，瀑布可否决）；
+    /// name/inject/isolate 变 → 冷重启（ReloadPluginAsync）；disabled 翻转 → 挂起/恢复
+    /// （SetEntryDisabledAsync）。应用后写回落盘（事务性刷新语义：新树 = 真源）。
+    /// </summary>
+    public async Task ApplyConfigAsync(IReadOnlyList<EntryOptions> newTree)
+    {
+        ArgumentNullException.ThrowIfNull(newTree);
+
+        while (_applyingConfig)
+        {
+            await Task.Delay(10).ConfigureAwait(false); // apply 串行化（08 §6.3）
+        }
+
+        _applyingConfig = true;
+        try
+        {
+            var diff = ConfigDiffer.Diff([.. _tree], newTree);
+            if (diff.IsEmpty)
+            {
+                return; // deepEqual 相等即跳过（08 §6.1）
+            }
+
+            // 移除 → 卸载
+            foreach (var id in diff.Removed)
+            {
+                await RemoveEntryAsync(id).ConfigureAwait(false);
+            }
+
+            // 新增 → 加载
+            foreach (var entry in diff.Added)
+            {
+                await CreateEntryAsync(entry).ConfigureAwait(false);
+            }
+
+            // disabled 翻转 → 挂起/恢复
+            foreach (var entry in diff.DisabledFlips)
+            {
+                await SetEntryDisabledAsync(entry.Id!, entry.Disabled == true).ConfigureAwait(false);
+            }
+
+            // 结构变 → 冷重启
+            foreach (var entry in diff.StructurallyChanged)
+            {
+                PluginReloading?.Invoke(this, new PluginReloadingEventArgs(entry.Id!));
+                ReplaceEntry(_tree, entry);
+                await ReloadPluginAsync(entry.Id!).ConfigureAwait(false);
+            }
+
+            // 仅 config 变 → 热更新（瀑布可否决；内部含写回）
+            foreach (var entry in diff.ConfigChanged)
+            {
+                PluginUpdating?.Invoke(this, new PluginUpdatingEventArgs(entry.Id!, entry.Config));
+                await UpdatePluginAsync(entry.Id!, entry.Config).ConfigureAwait(false);
+            }
+
+            ConfigReloaded?.Invoke(this, new ConfigReloadedEventArgs(diff.ChangedIds));
+        }
+        finally
+        {
+            _applyingConfig = false;
+        }
+    }
+
+    /// <summary>
+    /// 启用配置文件监听（DC-9，08 §6 触发源）：文件变更（防抖合并）→ 重读文件 →
+    /// <see cref="ApplyConfigAsync"/>。失败保留旧树（08 §6"最后好树保持运行"）。
+    /// </summary>
+    public void EnableConfigWatch()
+    {
+        ThrowIfShuttingDown();
+        var path = _options.ConfigFilePath
+            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed,
+                "ConfigFilePath is not configured — nothing to watch");
+        if (_configWatcher is not null)
+        {
+            return; // 幂等
+        }
+
+        _configWatcher = new ConfigFileWatcher(path, async () =>
+        {
+            var yaml = await File.ReadAllTextAsync(path).ConfigureAwait(false);
+            var tree = Keystone.Config.Entries.EntryParser.Parse(yaml);
+            await ApplyConfigAsync(tree).ConfigureAwait(false);
+        });
+    }
+
     // ── 管理面事件：PatchContext（waterfall 可否决，F9）──
 
     /// <summary>订阅上下文补丁瀑布（不调 next 即否决）。</summary>
@@ -430,6 +531,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         await ShutdownAsync().ConfigureAwait(false);
         _configWriter?.Dispose(); // DC-15：写回器随宿主释放
         _retention?.Dispose(); // DC-18：定时 Prune 随宿主停止
+        _configWatcher?.Dispose(); // DC-9：配置监听随宿主停止
     }
 
     // ── 内部 ──

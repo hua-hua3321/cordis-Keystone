@@ -156,6 +156,7 @@ created: 2026-08-15
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 | ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
 | ID-33 | 2026-08-16 | P38 | 静态插值双层形态（DC-8，ADR-0012）：YAML 整值标量走 tag 形态（!!env NAME/!!file path，YamlDotNet TagName）；文本内容内引用走冒号前缀形态（!!env:NAME）；缺失保留标记（tag 形态重构为 `!!env NAME` 字符串，不静默替换）；环检测 visited 改展开栈语义（add→递归→remove，同文件多处引用非环） | ADR-0012 tag 机制保留（YamlDotNet 自定义 tag）；字符串中间嵌入标记不支持（ADR 示例均为整值）；原实现 visited 只增不减（误报环） | `src/Keystone.Config/Interpolation/StaticInterpolator.cs`、`Entries/EntryParser.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-8） |
+| ID-46 | 2026-08-16 | P50 | 配置热重载管线（DC-9，08 §6）：①ConfigDiffer.Diff（树扁平化按 id 对齐；五路分类 = 新增/移除/仅 config 变/结构变(name·inject·isolate)/disabled 翻转——08 §6.1 分级判定；config 比对逐键，引用相等短路）；②ApplyConfigAsync 编排（_applyingConfig 自旋串行化防 watcher/CRUD 竞态交错 08 §6.3；逐条目路由既有动作：Create/Remove/SetEntryDisabled/ReloadPlugin（冷重启）/UpdatePlugin（热更新·瀑布可否决）；ConfigReloaded/PluginUpdating/PluginReloading 事件）；③ConfigFileWatcher（FileSystemWatcher + 100ms 防抖合并；回调异常吞掉续听——旁路降级保留旧树"最后好树保持运行"）；④EnableConfigWatch（ConfigFilePath 必填校验；重读 → EntryParser → ApplyConfigAsync；随宿主 Dispose 停） | 复用既有单条目动作（不另起一套应用逻辑——单一事实源）；组级事务（08 §6.2）与失败回滚逐条目（§6.1 聚合异常）为后续增强，本项落触发/diff/分级主链；watcher 默认关闭（显式 EnableConfigWatch——嵌入方控制） | `src/Keystone.Hosting/ConfigDiffer.cs`、`ConfigDiff.cs`、`ConfigFileWatcher.cs`、`ConfigReloadedEventArgs.cs` 等、`KeystoneHost.cs` | 否（17-doc-compliance-audit DC-9） |
 | ID-45 | 2026-08-16 | P49 | 取消传播通道（DC-14，06 §1）：①DomainRequest 增 CT 参数（默认 default）——CT 属运行态不入 TaskEnvelope DTO；本地消息按引用传递即达 actor，远程化演进时换超时预算；②ContextFacade 增请求 CT 槽 + `IPluginContext.CancellationToken`（自身槽未设置沿父链取——插件 handler 闭包读自身 context 即得实例级请求 CT；均无 = None 无请求语义）；actor 串行循环内 Set/Reset（单写者）；③已取消请求 fail-fast（不执行 handler，记录 PipelineCancelled 失败结果——幂等缓存可回放）；中间件/handler 抛 OperationCanceledException → 同归一（失败非监督重启） | CT 暴露选 context 链而非改 IMiddleware/handler 签名（公共面加法最小——中间件/handler 均经 context 读同一槽）；Proto 传输层对已取消 token 抛 ArgumentException 拒于发送——actor 侧语义经 SendRaw 测试缝（InternalsVisibleTo Keystone.Runtime.Tests）验证 | `Actors/DomainRequest.cs`、`Actors/CapabilityActor.cs`、`Actors/CapabilityHandle.cs`、`Context/{IPluginContext,ContextFacade}.cs` | 否（17-doc-compliance-audit DC-14） |
 | ID-44 | 2026-08-16 | P48 | 插件获取/运行抽象边界（DC-19，ADR-0001 决策 1-2）：①IPluginSource = 获取端抽象（FetchAsync(manifest, ct) → PluginSource）——演进路径本地→签名→远程仅替换实现，编译/ALC/dispose 管线不动；②LocalPluginSource 初始实现（manifest.Main 相对多根目录解析 + {root}/{id}/{main} 回退；未找到 → ConfigProviderFailed 精确报错）；③IPluginHost = 运行形态扩展点**预留**（IsolationModel 描述符；DefaultPluginHost.Instance = same-process-alc 本期唯一形态，方案 B 独立进程未来经此引入）；④KeystoneHostOptions.PluginSource/PluginHost + LoadEntryAsync 抽象优先于 SourceProvider 委托（委托保留向后兼容） | 接口放 Runtime/Plugins/Loading（与 PluginSource 同层）；获取端 async（远程分发天然异步）；PluginHost 仅描述符不接装配流程（预留面最小化——ADR-0001 "不进入本期默认配置"） | `src/Keystone.Runtime/Plugins/Loading/{IPluginSource,LocalPluginSource,IPluginHost,DefaultPluginHost}.cs`、`Hosting/` | 否（17-doc-compliance-audit DC-19） |
 | ID-43 | 2026-08-16 | P47 | 事件保留闭环（DC-18，ADR-0009 决策 3）：①StoredFact 增 Key(8) Durable——EventBus.PersistFactAsync 落盘时携带（旧数据缺键反序列化 = false 尽力写，向前兼容）；②FileEventStore 增 archivePath 构造参数——Prune 被清事实先同帧格式追加归档（可重放/审计）再重写主文件，未配置 = 纯删除原行为；③FactRetentionScheduler（PeriodicTimer 循环 PruneAsync，单轮失败降级吞掉续跑——旁路硬约束）；④宿主 KeystoneHostOptions.RetentionPolicy/PruneInterval（默认 1h）→ StartAsync 起 DisposeAsync 停（EventStore 与 Retention 同时配置才启用） | 归档 = 同帧格式追加文件（复用 FileEventStore 重放器可读，不引入新格式）；定时器在宿主层不在存储层（存储保持无后台线程的可嵌入性）；降级语义与 P39 EventBus 非 durable 吞错对齐 | `src/Keystone.Runtime/Persistence/StoredFact.cs`、`FileEventStore.cs`、`FactRetentionScheduler.cs`、`src/Keystone.Hosting/KeystoneHost.cs` | 否（17-doc-compliance-audit DC-18） |
@@ -778,6 +779,17 @@ created: 2026-08-15
 | 2026-08-16 | W49-03 | 已取消 fail-fast + OperationCanceledException 归一（PipelineCancelled 失败结果，不升级监督重启） | 实现（TDD） | DC-14；ID-45 | `CapabilityActor.cs` | `Already_canceled_request_fails_fast` + `Canceled_request_returns_failed_envelope` + `Middleware_cancellation_exception_yields_failed_envelope` | ✅ |
 | 2026-08-16 | W49-04 | 全量回归 328/328 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.50 P50 文档达标 DC-9：文件变更 → 重载 → diff → 逐条目更新
+
+> 17-doc-compliance-audit DC-9（⚠️→✅）：无配置 watcher/diff，热更新退化为 API 调用。本次落 08 §6 触发管线全链——17 审计 30 项差距（P0 5 + P1 4 + P2 11）**全部闭合**。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-16 | W50-01 | ConfigDiffer：按条目 id 五路分类（08 §6.1 分级判定 + config 逐键比对） | 实现（TDD） | DC-9；08 §6.1；ID-46 | `Hosting/ConfigDiffer.cs`、`ConfigDiff.cs` | `Diff_only_config_change` + `Diff_name_change` + `No_change_is_noop` | ✅ |
+| 2026-08-16 | W50-02 | ApplyConfigAsync 编排（串行化 + 逐条目路由既有动作 + 三事件） | 实现（TDD） | DC-9；08 §6；ID-46 | `Hosting/KeystoneHost.cs` | `Diff_added/removed` + `Disabled_flip_suspends` + 分级路由断言 | ✅ |
+| 2026-08-16 | W50-03 | ConfigFileWatcher（防抖合并 + 旁路降级）+ EnableConfigWatch 接线 | 实现（TDD） | DC-9；08 §6.3；ID-46 | `Hosting/ConfigFileWatcher.cs` | `Watcher_triggers_apply_on_file_change` | ✅ |
+| 2026-08-16 | W50-04 | 全量回归 334/334 + Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -902,6 +914,8 @@ created: 2026-08-15
 | ID-44 | ADR-0001 决策 1-2；DC-19 | `Runtime/Plugins/Loading/`、`Hosting/` | W48-01~04 |
 | W49-01~03 | ID-45 | `Actors/`、`Context/` | `CancellationPropagationTests`（5） |
 | ID-45 | 06 §1；DC-14 | `Actors/`、`Context/` | W49-01~04 |
+| W50-01~03 | ID-46 | `Hosting/`（diff/watcher/编排） | `ConfigHotReloadTests`（6） |
+| ID-46 | 08 §6；DC-9 | `Hosting/` | W50-01~04 |
 
 ## 9. 维护规则
 
