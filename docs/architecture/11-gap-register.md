@@ -56,7 +56,7 @@ created: 2026-08-15
 | O4 | 宿主嵌入形态（hosting API） | ✅ 已收敛 | 09 §5 | StartAsync/ShutdownAsync/Reload/DumpConfig |
 | O5 | 中间件形状 A/B | ✅ 已收敛 | 04 §2 | 形状 A（IMiddleware）定案 |
 | O6 | 插件脚本/DLL 双轨 | ✅ 已收敛 | 00-tech-stack T11 | 文件式应用 + ALC 管线 |
-| O7 | AI 能力域组合 | ✅ 已收敛 | ADR-0008 | MAF/MCP 单向依赖；**MCP 双端已落地（P14）**：MAF Mcp 无稳定版 → 协议层组合官方稳定 SDK `ModelContextProtocol.Core` 2.2.0（ID-12，ADR-0008 决策 4 备注） |
+| O7 | AI 能力域组合 | ✅ 已收敛 | ADR-0008 | MAF/MCP 单向依赖；**MCP 双端已落地（P14）**：MAF Mcp 无稳定版 → 协议层组合官方稳定 SDK `ModelContextProtocol.Core` 2.2.0（ID-12），公共面 = Keystone 协议中立契约隔离（ID-13，调用方零 SDK 类型） |
 
 ### 3.1 框架层通读补充项（H/M/L 系列，来源 12-cordis-semantics-mapping §7-§9）
 

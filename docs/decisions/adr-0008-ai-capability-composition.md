@@ -61,7 +61,7 @@ cordis-csharp 定位为**通用插件运行时**（配置驱动、多实例隔�
 - 生态桥：C# 插件可被任何 MCP 客户端消费；宿主可用整个 MCP 工具市场（跨语言生态）
 - 序列化分界（ADR-0004 不变）：域内 MessagePack 强类型直接调用；MCP 边界 JSON-RPC（SDK 自带），两处显式声明
 
-> **实现备注（2026-08-15，P14 落地，见 14-implementation-log §7.14 / ID-12）**：`Microsoft.Agents.AI.Mcp` 截至当前**无稳定版**（11 个版本全 alpha，最新 1.17.0-alpha.260804.1），不可作为生产依赖。方向不变（组合官方 MCP，不自研），**实现层替换**：MCP 协议层组合微软官方稳定协议 SDK `ModelContextProtocol`（NuGet `ModelContextProtocol.Core` 2.2.0，net10.0 原生支持、源生成 JSON AOT 友好、与 MAF 同源 M.E.AI）。`Keystone.AI/Mcp/`（McpClientBridge/McpServerBridge）承载双端薄适配；agent 集成层（MCP 工具 → typed AIFunction 进 MAF workflow）待 `Microsoft.Agents.AI.Mcp` 稳定后接入，桥接口不变。
+> **实现备注（2026-08-15，P14 落地，见 14-implementation-log §7.14 / ID-12、ID-13）**：`Microsoft.Agents.AI.Mcp` 截至当前**无稳定版**（11 个版本全 alpha，最新 1.17.0-alpha.260804.1），不可作为生产依赖；且已核实其内部依赖 `ModelContextProtocol ≥1.2.0`（协议层与 agent 集成层是**分层关系**，非二选一）。方向不变（组合官方 MCP，不自研），**实现层替换**：MCP 协议层组合微软官方稳定协议 SDK `ModelContextProtocol`（NuGet `ModelContextProtocol.Core` 2.2.0，net10.0 原生支持、源生成 JSON AOT 友好、与 MAF 同源 M.E.AI）。`Keystone.AI/Mcp/` 承载双端适配，**公共面 = Keystone 协议中立契约（ID-13）**：接口/DTO/options 零 SDK 类型，SDK 类型内聚于实现内部映射——协议层升级（2.x→3.x）或 MAF agent 集成层接入（MCP 工具 → typed AIFunction 进 MAF workflow）时**调用方零改动**（由 `Bridge_public_contracts_reference_no_MCP_SDK_types` 测试锁定）。
 
 ### 决策 5：Hyperlight 作为 `IPluginHost` 进程隔离参考（未来路线）
 

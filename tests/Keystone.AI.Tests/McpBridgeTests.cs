@@ -1,22 +1,22 @@
 using System.IO.Pipelines;
+using System.Reflection;
 using Keystone.AI.Mcp;
 using Microsoft.Extensions.Logging.Abstractions;
-using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
-using ModelContextProtocol.Server;
 
 namespace Keystone.AI.Tests;
 
 /// <summary>
-/// MCP 双端适配层测试（ADR-0008 决策 4 落地：MAF Mcp 未稳定，协议层组合官方稳定 SDK ModelContextProtocol.Core）。
-/// in-process 双端：StreamServerTransport + StreamClientTransport 经 Pipe 内存流对接，无外部进程/网络。
+/// MCP 双端适配层测试（ADR-0008 决策 4 落地：协议层组合官方稳定 SDK ModelContextProtocol.Core，
+/// 公共面 = Keystone 协议中立契约）。
+/// in-process 双端：Stream 传输经 Pipe 内存流对接，无外部进程/网络。
+/// 本测试文件除隔离验证用例外，不引用任何 MCP SDK 类型——证明调用方只依赖契约。
 /// </summary>
 public class McpBridgeTests
 {
-    private static readonly Implementation ServerInfo = new() { Name = "keystone-test", Version = "1.0.0" };
-    private static readonly Implementation ClientInfo = new() { Name = "keystone-client", Version = "1.0.0" };
+    private static readonly McpSessionIdentity ServerInfo = new() { Name = "keystone-test", Version = "1.0.0" };
+    private static readonly McpSessionIdentity ClientInfo = new() { Name = "keystone-client", Version = "1.0.0" };
 
-    private static (McpServerBridge Server, McpClientBridge Client, Task ServerRun) ConnectAsync(
+    private static (IMcpServerBridge Server, IMcpClientBridge Client, Task ServerRun) ConnectAsync(
         CancellationToken ct,
         string? protocolVersion = null)
     {
@@ -25,24 +25,39 @@ public class McpBridgeTests
         var s2c = new Pipe();
         var loggerFactory = NullLoggerFactory.Instance;
 
-        var serverTransport = new StreamServerTransport(c2s.Reader.AsStream(), s2c.Writer.AsStream(), "test-server", loggerFactory);
-        var clientTransport = new StreamClientTransport(c2s.Writer.AsStream(), s2c.Reader.AsStream(), loggerFactory);
-
         var serverOptions = new McpServerOptions { ServerInfo = ServerInfo };
         if (protocolVersion is not null)
         {
-            serverOptions.ProtocolVersion = protocolVersion;
+            serverOptions = serverOptions with { ProtocolVersion = protocolVersion };
         }
 
-        var server = McpServerBridge.Create(serverTransport, serverOptions, loggerFactory, services: null);
+        var server = McpServerBridge.Create(
+            new McpTransportOptions
+            {
+                Kind = McpTransportKind.Stream,
+                ServerReadStream = c2s.Reader.AsStream(),
+                ServerWriteStream = s2c.Writer.AsStream(),
+            },
+            serverOptions,
+            loggerFactory);
         var serverRun = server.RunAsync(ct);
+
         var clientOptions = new McpClientOptions { ClientInfo = ClientInfo };
         if (protocolVersion is not null)
         {
-            clientOptions.ProtocolVersion = protocolVersion;
+            clientOptions = clientOptions with { ProtocolVersion = protocolVersion };
         }
 
-        var client = McpClientBridge.ConnectAsync(clientTransport, clientOptions, loggerFactory, ct).GetAwaiter().GetResult();
+        var client = McpClientBridge.ConnectAsync(
+            new McpTransportOptions
+            {
+                Kind = McpTransportKind.Stream,
+                ClientWriteStream = c2s.Writer.AsStream(),
+                ClientReadStream = s2c.Reader.AsStream(),
+            },
+            clientOptions,
+            loggerFactory,
+            ct).GetAwaiter().GetResult();
         return (server, client, serverRun);
     }
 
@@ -54,9 +69,12 @@ public class McpBridgeTests
 
         await using var _server = server;
         await using var _client = client;
-        server.AddTool(McpServerTool.Create(
-            (string message) => $"echo:{message}",
-            new McpServerToolCreateOptions { Name = "echo", Description = "Echoes the input back" }));
+        server.AddTool(new McpToolDefinition
+        {
+            Name = "echo",
+            Description = "Echoes the input back",
+            Handler = (string message) => $"echo:{message}",
+        });
 
         // 枚举：client 侧可见 server 暴露的工具（跨"语言生态"边界）
         var tools = await client.ListToolsAsync(cts.Token);
@@ -66,9 +84,8 @@ public class McpBridgeTests
 
         // 调用：参数经 JSON-RPC 往返，结果带回
         var result = await client.CallToolAsync("echo", new Dictionary<string, object?> { ["message"] = "hello" }, cts.Token);
-        Assert.NotEqual(true, result.IsError); // 未标记错误（bool?，null 或 false 均视为成功）
-        var text = string.Concat(result.Content.OfType<TextContentBlock>().Select(b => b.Text));
-        Assert.Contains("echo:hello", text);
+        Assert.False(result.IsError);
+        Assert.Contains("echo:hello", string.Concat(result.TextContents));
 
         await cts.CancelAsync();
         try { await serverRun; } catch (OperationCanceledException) { }
@@ -82,8 +99,8 @@ public class McpBridgeTests
 
         await using var _server = server;
         await using var _client = client;
-        server.AddTool(McpServerTool.Create((string x) => x, new McpServerToolCreateOptions { Name = "alpha" }));
-        server.AddTool(McpServerTool.Create((string x) => x, new McpServerToolCreateOptions { Name = "beta" }));
+        server.AddTool(new McpToolDefinition { Name = "alpha", Handler = (string x) => x });
+        server.AddTool(new McpToolDefinition { Name = "beta", Handler = (string x) => x });
 
         var tools = await client.ListToolsAsync(cts.Token);
 
@@ -110,5 +127,66 @@ public class McpBridgeTests
 
         await cts.CancelAsync();
         try { await serverRun; } catch (OperationCanceledException) { }
+    }
+
+    [Fact]
+    public void Bridge_public_contracts_reference_no_MCP_SDK_types()
+    {
+        // 隔离验收（用户关注点）：调用方契约（接口 + DTO）的公共签名不得出现任何
+        // ModelContextProtocol.* 类型——实现可换（协议层升级 / MAF agent 集成层），调用方零改动。
+        var contractTypes = new[]
+        {
+            typeof(IMcpClientBridge),
+            typeof(IMcpServerBridge),
+            typeof(McpToolDescriptor),
+            typeof(McpToolCallResult),
+            typeof(McpToolDefinition),
+            typeof(McpTransportOptions),
+            typeof(McpClientOptions),
+            typeof(McpServerOptions),
+            typeof(McpSessionIdentity),
+        };
+
+        foreach (var type in contractTypes)
+        {
+            var sdkTypeNames = GetExposedSdkTypeNames(type);
+            Assert.True(
+                sdkTypeNames.Count == 0,
+                $"{type.Name} 公共面泄漏 SDK 类型: {string.Join(", ", sdkTypeNames)}");
+        }
+    }
+
+    private static HashSet<string> GetExposedSdkTypeNames(Type type)
+    {
+        var result = new HashSet<string>();
+        var methods = type.IsInterface
+            ? type.GetMethods()
+            : type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
+        foreach (var m in methods)
+        {
+            foreach (var p in m.GetParameters())
+            {
+                AddIfSdk(p.ParameterType, result);
+            }
+
+            AddIfSdk(m.ReturnType, result);
+        }
+
+        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+        {
+            AddIfSdk(prop.PropertyType, result);
+        }
+
+        return result;
+    }
+
+    private static void AddIfSdk(Type type, HashSet<string> result)
+    {
+        var n = type.Namespace ?? string.Empty;
+        if (n.StartsWith("ModelContextProtocol", StringComparison.Ordinal) ||
+            n.StartsWith("Microsoft.Extensions.AI", StringComparison.Ordinal))
+        {
+            result.Add(type.FullName ?? type.Name);
+        }
     }
 }

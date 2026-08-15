@@ -99,7 +99,8 @@ created: 2026-08-15
 | ID-09 | 2026-08-15 | P3 | 依赖消失 → 依赖方走完整卸载闸门（事件驱动 fire-and-forget，状态可轮询断言） | ADR-0007 决策 3：服务提供方卸载 → 依赖方 reload/unload | Plugins/Lifecycle/PluginRuntime.cs | 否 |
 | ID-10 | 2026-08-15 | P3 | manifest 校验 Kahn 拓扑排序（入度 = 前置依赖数）检测环 + inject 可达性 fail-fast | ADR-0007 决策 2 影响：启动期校验器 | Plugins/Manifest/ManifestValidator.cs | 否 |
 | ID-11 | 2026-08-15 | P8 | F10 跨 realm 服务转移优化**不实现** | 多实例隔离靠解析侧独立 context 天然达成（每实例 scope 独立）；转移是性能优化非语义必需，实现成本/收益比不划算 | 03 §2.2；Actors/ | 否 |
-| ID-12 | 2026-08-15 | P14 | MCP 协议层落地选型：MAF Mcp 无稳定版 → 协议层组合官方稳定 SDK `ModelContextProtocol.Core` 2.2.0 实现双端；agent 集成层（typed AIFunction 进 MAF workflow）待 `Microsoft.Agents.AI.Mcp` 稳定后接入 | ADR-0008 决策 4 方向不变（组合官方 MCP 不自研）；协议 SDK 稳定（net10.0 原生、AOT 友好、M.E.AI 同源）；避免 alpha 依赖锁死 | `src/Keystone.AI/Mcp/`（McpClientBridge/McpServerBridge）；仅 Keystone.AI 引用 | 否（ADR-0008 决策 4 备注 + 11-gap 追踪） |
+| ID-12 | 2026-08-15 | P14 | MCP 协议层落地选型：MAF Mcp 无稳定版 → 协议层组合官方稳定 SDK `ModelContextProtocol.Core` 2.2.0 实现双端；agent 集成层（typed AIFunction 进 MAF workflow）待 `Microsoft.Agents.AI.Mcp` 稳定后接入 | ADR-0008 决策 4 方向不变（组合官方 MCP 不自研）；协议 SDK 稳定（net10.0 原生、AOT 友好、M.E.AI 同源）；避免 alpha 依赖锁死；已核实 MAF Mcp 依赖 ModelContextProtocol ≥1.2.0（分层非替代） | `src/Keystone.AI/Mcp/`（McpClientBridge/McpServerBridge）；仅 Keystone.AI 引用 | 否（ADR-0008 决策 4 备注 + 11-gap 追踪） |
+| ID-13 | 2026-08-15 | P14 | MCP 桥**契约隔离**：公共面 = Keystone 协议中立契约（接口 + DTO + options，零 SDK 类型），SDK 类型全部内聚于实现内部做映射；传输所有权按官方源码落实（client 会话由 McpClient 释放、server 会话由桥释放） | 用户评审质疑"MAF 稳定后要改很多东西"→ 隔离面设计；公共签名无 SDK 类型由测试锁定（换实现调用方零改动） | `src/Keystone.AI/Mcp/`（契约 + 实现分层） | 否（ADR-0008 决策 4 备注 + 14 §7.14） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -339,11 +340,12 @@ created: 2026-08-15
 | 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
 |------|------|--------|------|---------|---------|---------|------|
 | 2026-08-15 | W14-01 | CPM 引入 `ModelContextProtocol.Core` 2.2.0（仅 Keystone.AI 引用） | 实现 | ADR-0008 决策 4；ID-12 | `Directory.Packages.props`、`Keystone.AI.csproj` | restore 绿；版本解析无冲突（M.E.AI.Abstractions 10.8.3 满足 MAF ≥10.7.0 与 MCP ≥10.8.3） | ✅ |
-| 2026-08-15 | W14-02 | McpClientBridge：连接/枚举工具/调用工具/ping（薄封装 McpClient，传输注入，不重造协议） | 实现（TDD） | ADR-0008 决策 4；ID-12 | `src/Keystone.AI/Mcp/McpClientBridge.cs` | `McpBridgeTests`（3） | ✅ |
-| 2026-08-15 | W14-03 | McpServerBridge：工具注册/会话运行（薄封装 McpServer，ToolCollection 惰性初始化） | 实现（TDD） | ADR-0008 决策 4；ID-12 | `src/Keystone.AI/Mcp/McpServerBridge.cs` | `McpBridgeTests`（3） | ✅ |
-| 2026-08-15 | W14-04 | in-process 双端测试：Pipe 内存流对接 StreamServerTransport/StreamClientTransport（无外部进程/网络） | 测试（TDD） | ADR-0008 决策 4 | `tests/Keystone.AI.Tests/McpBridgeTests.cs` | 3 用例绿（discover+call/多工具枚举/旧协议 ping） | ✅ |
+| 2026-08-15 | W14-02 | 契约面：McpToolDescriptor/McpToolCallResult/McpToolDefinition/McpTransportOptions/McpClientOptions/McpServerOptions/McpSessionIdentity（协议中立，零 SDK 类型） | 实现（TDD） | ADR-0008 决策 4；ID-12/13 | `src/Keystone.AI/Mcp/*.cs` | `Bridge_public_contracts_reference_no_MCP_SDK_types` | ✅ |
+| 2026-08-15 | W14-03 | McpClientBridge/McpServerBridge：实现 IMcpClientBridge/IMcpServerBridge，内部 SDK 映射（含传输所有权按 SDK 源码：client 会话由 McpClient 释放、server 会话由桥释放） | 实现（TDD） | ADR-0008 决策 4；ID-12/13 | `src/Keystone.AI/Mcp/McpClientBridge.cs`、`McpServerBridge.cs` | `McpBridgeTests`（3）+ 隔离验证 | ✅ |
+| 2026-08-15 | W14-04 | in-process 双端测试（契约 API）：Pipe 内存流对接 Stream 传输，无外部进程/网络 | 测试（TDD） | ADR-0008 决策 4 | `tests/Keystone.AI.Tests/McpBridgeTests.cs` | 3 用例绿（discover+call/多工具枚举/旧协议 ping） | ✅ |
 | 2026-08-15 | W14-05 | 架构测试扩展：核心 5 程序集不引用 `ModelContextProtocol*`（单向依赖延伸） | 测试 | ADR-0008 决策 1/4 | `tests/Keystone.AI.Tests/AITests.cs` | 5 程序集断言空 | ✅ |
-| 2026-08-15 | W14-06 | 全量回归 195/195 + Keystone.AI AOT 发布冒烟（ModelContextProtocol.Core 源生成 JSON，零 IL 警告） | 验收 | 规则 0；ADR-0008 组合包 AOT 验收门 | — | `dotnet test` + `PublishAot=true` | ✅ |
+| 2026-08-15 | W14-06 | 全量回归 196/196 + Keystone.AI AOT 发布冒烟（ModelContextProtocol.Core 源生成 JSON，零 IL 警告） | 验收 | 规则 0；ADR-0008 组合包 AOT 验收门 | — | `dotnet test` + `PublishAot=true` | ✅ |
+| 2026-08-15 | W14-07 | **抽象隔离评审整改**（用户质疑）：初版桥公共签名直接暴露 SDK 类型 → 重做为契约面 + 内部映射；按官方源码确认传输所有权（非反射猜测） | 重构（TDD） | ID-13 | `src/Keystone.AI/Mcp/` | 隔离验证测试 + 196/196 全绿 | ✅ |
 
 ## 8. 回溯索引（三向映射）
 
@@ -385,11 +387,12 @@ created: 2026-08-15
 | ID-05 | 12 §8 M6 | `Errors/ErrorCode.cs` | W1-04 |
 | ID-02 | 用户决策 | 全仓命名空间/包名 | W0-05 |
 | W14-01 | ADR-0008 决策 4；ID-12 | `Directory.Packages.props`、`Keystone.AI.csproj` | restore 绿 |
-| W14-02 | ID-12 | `AI/Mcp/McpClientBridge.cs` | `McpBridgeTests`（3） |
-| W14-03 | ID-12 | `AI/Mcp/McpServerBridge.cs` | `McpBridgeTests`（3） |
+| W14-02 | ID-12/13 | `AI/Mcp/`（契约 DTO/options） | `Bridge_public_contracts_reference_no_MCP_SDK_types` |
+| W14-03 | ID-12/13 | `AI/Mcp/McpClientBridge.cs`、`McpServerBridge.cs` | `McpBridgeTests`（3）+ 隔离验证 |
 | W14-04 | ADR-0008 决策 4 | `tests/Keystone.AI.Tests/McpBridgeTests.cs` | 3 用例绿 |
 | W14-05 | ADR-0008 决策 1/4 | `tests/Keystone.AI.Tests/AITests.cs` | 5 程序集断言空 |
 | ID-12 | ADR-0008 决策 4 | `AI/Mcp/`（双端桥） | W14-01~06 |
+| ID-13 | 用户评审 | `AI/Mcp/`（契约隔离） | W14-07 |
 
 ## 9. 维护规则
 
