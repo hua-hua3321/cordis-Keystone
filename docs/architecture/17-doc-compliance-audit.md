@@ -9,7 +9,7 @@ created: 2026-08-15
 > 触发：用户指出"要根据文档里面的要求来做"，P33 暴露实现是文档的近似而非要求（如 01 §4 每实例持久 context 被简化为每请求新建）。
 > 方法：workflow 并行 5 子代理，逐项对照架构文档（00-16）与 ADR-0001~0015 的**可验证承诺** vs 当前实现。
 > 结果：30 项差距（5 域 × 6，全 ⚠️/❌），集中在"功能实现了但未按文档接线/语义简化"。
-> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 推进中：DC-8 ✅（P38）/ DC-11 ✅（P39）**；其余按 §4 计划排期。
+> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 推进中：DC-8 ✅（P38）/ DC-11 ✅（P39）/ DC-10 ✅（P40）**；其余按 §4 计划排期。
 
 ## 1. 审计方法
 
@@ -32,7 +32,7 @@ created: 2026-08-15
 | DC-7 | 08 §4 | 配置分层叠加（base/profile/patch/overlay + 环境选择） | ApplyLayers 孤立工具类；宿主只吃单 YAML 字符串 | ❌ |
 | DC-8 | ADR-0012 | !!env/!!file 静态插值（YAML tag 语法 + 无环检测 + 展开后校验） | **✅ 已修复（P38）**：EntryParser 接 StaticInterpolator（!!env NAME/!!file path tag 展开，缺失保留标记，visited 环检测跨整次解析）；宿主 EnvProvider/FileProvider 注入（展开后进 schema 校验） | ✅ |
 | DC-9 | 08 §6 | 文件变更→重载→diff→逐条目更新 + 写回管线 | 无配置 watcher/diff；热更新退化为 API 调用 | ⚠️ |
-| DC-10 | 04 §8、ADR-0003 | 管道原子替换（swap）+ 在途排空 + 保留 actor/context | 管道每请求重建，节点 spawn 固化，无 swap API | ❌ |
+| DC-10 | 04 §8、ADR-0003 | 管道原子替换（swap）+ 在途排空 + 保留 actor/context | **✅ 已修复（P40）**：管道实例化缓存（构建一次跨请求复用）+ SwapPipelineAsync 原子换引用（保留 actor/context；串行循环内在途走旧链） | ✅ |
 | DC-11 | ADR-0009 | 事实事件持久化接入运行链 | **✅ 已修复（P39）**：IFactEvent 标记（emit 分发持久化，durable 分级）+ 任务完成/失败事实（能力域 actor）+ 插件生命周期事实（PluginRuntime）+ 宿主 EventStore 选项（根总线携带） | ✅ |
 | DC-12 | 03 §1/§7 | actor=context 同生命周期，状态跨请求驻留 | 每请求新建 context（DC-1 修复前） | ✅ 随 DC-1 |
 
@@ -66,7 +66,7 @@ created: 2026-08-15
 | P0 | DC-6 | Register 重复报错 + 热重载注册隔离 | 小 |
 | P1 | DC-8 | StaticInterpolator 接 EntryParser（tag 语法）+ 无环检测 | ✅ 已修复（P38） |
 | P1 | DC-11 | EventBus/PluginRuntime 事实事件写入 IEventStore | ✅ 已修复（P39） |
-| P1 | DC-10 | 管道实例化缓存 + swap API（原子替换） | 中 |
+| P1 | DC-10 | 管道实例化缓存 + swap API（原子替换） | ✅ 已修复（P40） |
 | P1 | DC-7 | 宿主接分层叠加（base/patch 组装） | 中 |
 | P2 | DC-9/13/14/15/16/17/18/19/20 | 逐项 | 各小-中 |
 

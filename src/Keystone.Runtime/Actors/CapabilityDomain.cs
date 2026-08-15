@@ -83,6 +83,18 @@ public sealed class CapabilityDomain : IAsyncDisposable
         return RequestCoreAsync(handle.Pid, envelope, cancellationToken);
     }
 
+    /// <summary>
+    /// 管道原子替换（DC-10，ADR-0003 决策 2 / 04 §8）：新中间件链 → actor 内构建新管道 →
+    /// 原子换引用。保留 actor/context（状态不丢），只换管道链；串行循环内在途请求走旧链完成后生效。
+    /// </summary>
+    public Task SwapPipelineAsync(CapabilityHandle handle, IReadOnlyList<IMiddleware> middlewares)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        ArgumentNullException.ThrowIfNull(middlewares);
+        _system.Root.Send(handle.Pid, new SwapPipeline(middlewares));
+        return Task.CompletedTask;
+    }
+
     internal async Task<TaskResultEnvelope> RequestCoreAsync(PID pid, TaskEnvelope envelope, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pid);
