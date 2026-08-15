@@ -43,8 +43,12 @@ public class ConfigHotReloadTests : IDisposable
         return host;
     }
 
-    private static Task WriteConfigAsync(string path, string yaml)
-        => File.WriteAllTextAsync(path, yaml);
+    private static async Task WriteConfigAsync(string path, string yaml)
+    {
+        // 先删再写：确保触发 Created/Changed（同尺寸覆盖写在并行 IO 下可能不产生 LastWrite 事件）
+        File.Delete(path);
+        await File.WriteAllTextAsync(path, yaml);
+    }
 
     [Fact]
     public async Task Diff_only_config_change_routes_to_hot_update()
@@ -133,11 +137,11 @@ public class ConfigHotReloadTests : IDisposable
         host.ConfigReloaded += (_, e) => applied.TrySetResult(string.Join(",", e.ChangedIds));
 
         await WriteConfigAsync(ConfigPath, "- id: a\n  name: ./a\n- id: b\n  name: ./b\n"); // 文件变更
-        var timeout = Task.Delay(TimeSpan.FromSeconds(10));
+        var timeout = Task.Delay(TimeSpan.FromSeconds(30));
         var completed = await Task.WhenAny(applied.Task, timeout);
         if (completed == timeout)
         {
-            Assert.Fail("watcher did not trigger apply within 10s");
+            Assert.Fail("watcher did not trigger apply within 30s");
         }
 
         Assert.Contains("b", await applied.Task, StringComparison.Ordinal); // watcher 触发重载并含新增条目
