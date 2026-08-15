@@ -101,7 +101,7 @@ public sealed class CapabilityDomain : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(envelope);
 
         var response = await _system.Root
-            .RequestAsync<DomainResponse>(pid, new DomainRequest(envelope), cancellationToken)
+            .RequestAsync<DomainResponse>(pid, new DomainRequest(envelope, cancellationToken), cancellationToken)
             .ConfigureAwait(false);
         return response.Envelope;
     }

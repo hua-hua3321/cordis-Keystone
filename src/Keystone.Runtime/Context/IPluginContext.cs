@@ -12,6 +12,13 @@ public interface IPluginContext
     /// <summary>底层运行时上下文（完整面）。</summary>
     IContext Context { get; }
 
+    /// <summary>
+    /// 当前请求的取消令牌（DC-14，06 §1：取消贯穿全链）：中间件/handler 经 context 读取；
+    /// 无请求语义（初始化/后台）= <see cref="CancellationToken.None"/>；
+    /// 请求 CT 沿 context 链向上取实例级槽位（插件 handler 闭包读自身 context 即得）。
+    /// </summary>
+    CancellationToken CancellationToken { get; }
+
     /// <summary>按服务名解析；未就绪 → PENDING 等待后注入（ADR-0007，P3 实现）。</summary>
     T Get<T>(string serviceName);
 

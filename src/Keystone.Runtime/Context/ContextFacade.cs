@@ -12,6 +12,8 @@ namespace Keystone.Runtime.Context;
 /// </summary>
 public sealed class ContextFacade : IPluginContext, IContext
 {
+    private CancellationToken _requestCancellationToken; // DC-14：请求 CT 槽（actor 串行循环内设置——单写者无竞争）
+
     private readonly ServiceStore _services = new();
     private readonly EventBus _events;
     private readonly EffectRegistry _effects = new();
@@ -160,6 +162,21 @@ public sealed class ContextFacade : IPluginContext, IContext
     // ── IContext：Effect / 日志 / 拦截器 ──
 
     /// <summary>命名日志（category：DC-20 = {域前缀}/{name}，无前缀 = name）。</summary>
+    /// <summary>
+    /// 当前请求取消令牌（DC-14，06 §1）：自身槽未设置时沿父链取（插件 handler 闭包读自身
+    /// context 即得实例级请求 CT）；均无 = None（无请求语义）。
+    /// </summary>
+    public CancellationToken CancellationToken
+        => _requestCancellationToken != default
+            ? _requestCancellationToken
+            : (Parent as ContextFacade)?.CancellationToken ?? default;
+
+    /// <summary>
+    /// 设置/复位请求 CT 槽（DC-14）：由运行时 actor 在串行消息循环内调用（请求开始设置/结束复位）；
+    /// 嵌入方/插件只读——不手动调用（非线程安全面）。
+    /// </summary>
+    public void SetRequestCancellationToken(CancellationToken token) => _requestCancellationToken = token;
+
     public ILogger GetLogger(string? name = null)
         => _loggerFactory.CreateLogger(
             _logCategoryPrefix is { } prefix ? $"{prefix}/{name ?? Name}" : name ?? Name);

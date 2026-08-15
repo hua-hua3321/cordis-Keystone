@@ -76,6 +76,7 @@ created: 2026-08-15
 | P46 文档达标 DC-17 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | manifest configSchema + semver/白名单（§7.46：ConfigSchema 字段 + GeneratedRegex 校验 + 编译白名单，311/311 全绿） | §7.46 |
 | P47 文档达标 DC-18 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 事件分级落盘/归档/定时 Prune（§7.47：StoredFact.Durable + archivePath 归档 + FactRetentionScheduler 宿主接线，317/317 全绿） | §7.47 |
 | P48 文档达标 DC-19 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | IPluginSource/IPluginHost 抽象边界（§7.48：获取端抽象 + LocalPluginSource + 运行形态扩展点预留 + 宿主优先接线，323/323 全绿） | §7.48 |
+| P49 文档达标 DC-14 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 取消贯穿全链（§7.49：DomainRequest 载 CT + context 链暴露 + fail-fast/取消异常归一，328/328 全绿） | §7.49 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -155,6 +156,7 @@ created: 2026-08-15
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 | ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
 | ID-33 | 2026-08-16 | P38 | 静态插值双层形态（DC-8，ADR-0012）：YAML 整值标量走 tag 形态（!!env NAME/!!file path，YamlDotNet TagName）；文本内容内引用走冒号前缀形态（!!env:NAME）；缺失保留标记（tag 形态重构为 `!!env NAME` 字符串，不静默替换）；环检测 visited 改展开栈语义（add→递归→remove，同文件多处引用非环） | ADR-0012 tag 机制保留（YamlDotNet 自定义 tag）；字符串中间嵌入标记不支持（ADR 示例均为整值）；原实现 visited 只增不减（误报环） | `src/Keystone.Config/Interpolation/StaticInterpolator.cs`、`Entries/EntryParser.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-8） |
+| ID-45 | 2026-08-16 | P49 | 取消传播通道（DC-14，06 §1）：①DomainRequest 增 CT 参数（默认 default）——CT 属运行态不入 TaskEnvelope DTO；本地消息按引用传递即达 actor，远程化演进时换超时预算；②ContextFacade 增请求 CT 槽 + `IPluginContext.CancellationToken`（自身槽未设置沿父链取——插件 handler 闭包读自身 context 即得实例级请求 CT；均无 = None 无请求语义）；actor 串行循环内 Set/Reset（单写者）；③已取消请求 fail-fast（不执行 handler，记录 PipelineCancelled 失败结果——幂等缓存可回放）；中间件/handler 抛 OperationCanceledException → 同归一（失败非监督重启） | CT 暴露选 context 链而非改 IMiddleware/handler 签名（公共面加法最小——中间件/handler 均经 context 读同一槽）；Proto 传输层对已取消 token 抛 ArgumentException 拒于发送——actor 侧语义经 SendRaw 测试缝（InternalsVisibleTo Keystone.Runtime.Tests）验证 | `Actors/DomainRequest.cs`、`Actors/CapabilityActor.cs`、`Actors/CapabilityHandle.cs`、`Context/{IPluginContext,ContextFacade}.cs` | 否（17-doc-compliance-audit DC-14） |
 | ID-44 | 2026-08-16 | P48 | 插件获取/运行抽象边界（DC-19，ADR-0001 决策 1-2）：①IPluginSource = 获取端抽象（FetchAsync(manifest, ct) → PluginSource）——演进路径本地→签名→远程仅替换实现，编译/ALC/dispose 管线不动；②LocalPluginSource 初始实现（manifest.Main 相对多根目录解析 + {root}/{id}/{main} 回退；未找到 → ConfigProviderFailed 精确报错）；③IPluginHost = 运行形态扩展点**预留**（IsolationModel 描述符；DefaultPluginHost.Instance = same-process-alc 本期唯一形态，方案 B 独立进程未来经此引入）；④KeystoneHostOptions.PluginSource/PluginHost + LoadEntryAsync 抽象优先于 SourceProvider 委托（委托保留向后兼容） | 接口放 Runtime/Plugins/Loading（与 PluginSource 同层）；获取端 async（远程分发天然异步）；PluginHost 仅描述符不接装配流程（预留面最小化——ADR-0001 "不进入本期默认配置"） | `src/Keystone.Runtime/Plugins/Loading/{IPluginSource,LocalPluginSource,IPluginHost,DefaultPluginHost}.cs`、`Hosting/` | 否（17-doc-compliance-audit DC-19） |
 | ID-43 | 2026-08-16 | P47 | 事件保留闭环（DC-18，ADR-0009 决策 3）：①StoredFact 增 Key(8) Durable——EventBus.PersistFactAsync 落盘时携带（旧数据缺键反序列化 = false 尽力写，向前兼容）；②FileEventStore 增 archivePath 构造参数——Prune 被清事实先同帧格式追加归档（可重放/审计）再重写主文件，未配置 = 纯删除原行为；③FactRetentionScheduler（PeriodicTimer 循环 PruneAsync，单轮失败降级吞掉续跑——旁路硬约束）；④宿主 KeystoneHostOptions.RetentionPolicy/PruneInterval（默认 1h）→ StartAsync 起 DisposeAsync 停（EventStore 与 Retention 同时配置才启用） | 归档 = 同帧格式追加文件（复用 FileEventStore 重放器可读，不引入新格式）；定时器在宿主层不在存储层（存储保持无后台线程的可嵌入性）；降级语义与 P39 EventBus 非 durable 吞错对齐 | `src/Keystone.Runtime/Persistence/StoredFact.cs`、`FileEventStore.cs`、`FactRetentionScheduler.cs`、`src/Keystone.Hosting/KeystoneHost.cs` | 否（17-doc-compliance-audit DC-18） |
 | ID-42 | 2026-08-16 | P46 | manifest 校验扩展（DC-17，10 §6）：PluginManifest 增 ConfigSchema 可选参数（null = 无 schema 声明，G-C1 原始直传语义不变）；ManifestSchemaValidator 增两项——version 语义化版本（semver 2.0 形态：MAJOR.MINOR.PATCH[-prerelease][+build]，GeneratedRegex + NonBacktracking 防 ReDoS，MA0009/MA0023 合规）、dependencies ⊆ AssemblyWhitelist 公共集合（cordis-runtime/contracts + Keystone.* + M.E.Logging.Abstractions；越界精确报错——规则 0：System.Reflection.Emit 等宿主禁用依赖在编译期拦截） | 10 §6 "version 必填，语义化版本"+"程序集编译白名单"；白名单做公共静态集合（嵌入方可审查/扩展面）；semver 用 NonBacktracking（AOT 安全 + 线性时间） | `src/Keystone.Runtime/Plugins/Manifest/PluginManifest.cs`、`src/Keystone.Sdk/Manifest/ManifestSchemaValidator.cs` | 否（17-doc-compliance-audit DC-17） |
@@ -765,6 +767,17 @@ created: 2026-08-15
 | 2026-08-16 | W48-03 | 宿主接线：PluginSource/PluginHost 选项；抽象优先于 SourceProvider 委托（向后兼容） | 实现（TDD） | DC-19；ID-44 | `Hosting/KeystoneHostOptions.cs`、`KeystoneHost.cs` | `Host_loads_plugin_via_source_abstraction` + `Source_abstraction_takes_priority_over_delegate` | ✅ |
 | 2026-08-16 | W48-04 | 全量回归 323/323 + Runtime/Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` × 2 | ✅ |
 
+### 7.49 P49 文档达标 DC-14：取消贯穿全链
+
+> 17-doc-compliance-audit DC-14（❌→✅）：取消止于传输层。本次打通调用方 CT → actor → 中间件/handler 全链（06 §1 兑现）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-16 | W49-01 | DomainRequest 载 CT（运行态不入信封 DTO；本地按引用传递）+ actor 设置/复位实例 context 槽 | 实现（TDD） | DC-14；06 §1；ID-45 | `Actors/DomainRequest.cs`、`CapabilityActor.cs` | `Middleware_observes_caller_cancellation_token` | ✅ |
+| 2026-08-16 | W49-02 | IPluginContext.CancellationToken（沿 context 链向上取——handler 闭包读自身 context 即得） | 实现（TDD） | DC-14；ID-45 | `Context/{IPluginContext,ContextFacade}.cs` | `Cancellation_flows_down_context_chain_to_plugin_handlers` | ✅ |
+| 2026-08-16 | W49-03 | 已取消 fail-fast + OperationCanceledException 归一（PipelineCancelled 失败结果，不升级监督重启） | 实现（TDD） | DC-14；ID-45 | `CapabilityActor.cs` | `Already_canceled_request_fails_fast` + `Canceled_request_returns_failed_envelope` + `Middleware_cancellation_exception_yields_failed_envelope` | ✅ |
+| 2026-08-16 | W49-04 | 全量回归 328/328 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -887,6 +900,8 @@ created: 2026-08-15
 | ID-43 | ADR-0009 决策 3；DC-18 | `Runtime/Persistence/`、`Hosting/` | W47-01~04 |
 | W48-01~03 | ID-44 | `Runtime/Plugins/Loading/`、`Hosting/` | `PluginSourceAbstractionTests`（4）+ `PluginSourceWiringTests`（2） |
 | ID-44 | ADR-0001 决策 1-2；DC-19 | `Runtime/Plugins/Loading/`、`Hosting/` | W48-01~04 |
+| W49-01~03 | ID-45 | `Actors/`、`Context/` | `CancellationPropagationTests`（5） |
+| ID-45 | 06 §1；DC-14 | `Actors/`、`Context/` | W49-01~04 |
 
 ## 9. 维护规则
 

@@ -9,7 +9,7 @@ created: 2026-08-15
 > 触发：用户指出"要根据文档里面的要求来做"，P33 暴露实现是文档的近似而非要求（如 01 §4 每实例持久 context 被简化为每请求新建）。
 > 方法：workflow 并行 5 子代理，逐项对照架构文档（00-16）与 ADR-0001~0015 的**可验证承诺** vs 当前实现。
 > 结果：30 项差距（5 域 × 6，全 ⚠️/❌），集中在"功能实现了但未按文档接线/语义简化"。
-> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 四项全部修复（DC-8 P38 / DC-11 P39 / DC-10 P40 / DC-7 P41）；P2 推进中：DC-16 ✅（P42）/ DC-20 ✅（P43）/ DC-13 ✅（P44）/ DC-15 ✅（P45）/ DC-17 ✅（P46）/ DC-18 ✅（P47）/ DC-19 ✅（P48）**；其余按 §4 计划排期。
+> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 四项全部修复（DC-8 P38 / DC-11 P39 / DC-10 P40 / DC-7 P41）；P2 推进中：DC-16 ✅（P42）/ DC-20 ✅（P43）/ DC-13 ✅（P44）/ DC-15 ✅（P45）/ DC-17 ✅（P46）/ DC-18 ✅（P47）/ DC-19 ✅（P48）/ DC-14 ✅（P49）**；其余按 §4 计划排期（剩 DC-9 文件 watcher）。
 
 ## 1. 审计方法
 
@@ -41,7 +41,7 @@ created: 2026-08-15
 | ID | 文档 | 要求 | 现状 |
 |----|------|------|------|
 | DC-13 | 06 §3/§4 | Trace 接入 + TaskId 幂等去重 | **✅ 已修复（P44）**：请求执行包裹 keystone.task Activity（TaskId/ParentTaskId/能力域/操作 tag 贯穿，结束恢复前序）；重复 TaskId 回缓存结果不重执行（FIFO 容量上限防无界增长） | ✅ |
-| DC-14 | 06 §1 | 取消贯穿全链（CT 传中间件/handler） | 取消止于传输层 |
+| DC-14 | 06 §1 | 取消贯穿全链（CT 传中间件/handler） | **✅ 已修复（P49）**：调用方 CT 随 DomainRequest 入 actor（本地按引用传递；信封 DTO 不载 CT）；请求 CT 经实例 context 槽暴露 IPluginContext.CancellationToken（沿链向上取——插件 handler 闭包读自身 context 即得）；已取消请求 fail-fast（PipelineCancelled 失败结果，不升级监督重启）；中间件抛 OperationCanceledException → 同语义 | ✅ |
 | DC-15 | 09 §5 | CRUD 落盘写回管线 + position 参数 | **✅ 已修复（P45）**：ConfigFilePath 选项 → CRUD 防抖写回（原子写+重试）+ FlushConfigAsync/Shutdown 排空；CreateEntry/MoveEntry position 参数；**并修复死代码 bug**（Serialize 方法组绑定 Select 索引重载 → 下标灌进 indent，多条目写坏） | ✅ |
 | DC-16 | 08 §3 | disabled 挂起 + isolate 组级隔离 | **⚠️ 部分（P42）**：disabled 运行行为已兑现（挂起不加载/父组继承子树/SetEntryDisabledAsync 恢复/挂起条目不参与门控拓扑与 manifest 校验）；isolate 组级服务隔离未接线（3 §2.2 语义，后续项） |
 | DC-17 | 10 §6、ADR-0008 | manifest configSchema + semver/白名单校验 | **✅ 已修复（P46）**：PluginManifest.ConfigSchema 字段（可选，null=原始直传）；version 语义化版本校验（GeneratedRegex + NonBacktracking）；dependencies ⊆ 程序集编译白名单（越界 fail-fast，规则 0） | ✅ |

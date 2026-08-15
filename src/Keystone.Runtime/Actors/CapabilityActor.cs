@@ -64,7 +64,7 @@ internal sealed class CapabilityActor : IActor
         ArgumentNullException.ThrowIfNull(context);
         switch (context.Message)
         {
-            case DomainRequest { Envelope: var envelope }:
+            case DomainRequest { Envelope: var envelope, CancellationToken: var requestCt }:
                 // DC-13：幂等去重——重复 TaskId 直接回缓存（不重执行、不重发事实）
                 if (_results.TryGetValue(envelope.TaskId, out var cached))
                 {
@@ -72,7 +72,31 @@ internal sealed class CapabilityActor : IActor
                     break;
                 }
 
-                var result = await ExecuteTracedAsync(envelope).ConfigureAwait(false);
+                // DC-14：已取消请求 fail-fast——不执行 handler（06 §1 取消贯穿；记录失败非异常升级）
+                TaskResultEnvelope result;
+                if (requestCt.IsCancellationRequested)
+                {
+                    result = CancelledResult(envelope);
+                }
+                else
+                {
+                    // DC-14：请求 CT 经实例 context 暴露（中间件/handler 链上可读；结束复位）
+                    _instanceContext.SetRequestCancellationToken(requestCt);
+                    try
+                    {
+                        result = await ExecuteTracedAsync(envelope).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // 中间件/handler 主动取消 → 任务失败（不升级监督重启）
+                        result = CancelledResult(envelope);
+                    }
+                    finally
+                    {
+                        _instanceContext.SetRequestCancellationToken(CancellationToken.None);
+                    }
+                }
+
                 RecordResult(envelope.TaskId, result);
                 await PublishFactAsync(envelope, result).ConfigureAwait(false); // DC-11：任务完成/失败事实
                 context.Respond(new DomainResponse(result));
@@ -131,6 +155,16 @@ internal sealed class CapabilityActor : IActor
             activity.Dispose();
         }
     }
+
+    /// <summary>DC-14：取消结果（PipelineCancelled——06 §1 取消贯穿；失败不升级监督）。</summary>
+    private static TaskResultEnvelope CancelledResult(TaskEnvelope envelope) => new()
+    {
+        TaskId = envelope.TaskId,
+        Succeeded = false,
+        Type = TaskResultType.Failed,
+        ErrorCode = Keystone.Core.Errors.ErrorCode.PipelineCancelled,
+        ErrorDetail = "request canceled before completion (caller CT)",
+    };
 
     /// <summary>DC-13：结果缓存（FIFO 容量上限，防无界增长）。</summary>
     private void RecordResult(Guid taskId, TaskResultEnvelope result)
