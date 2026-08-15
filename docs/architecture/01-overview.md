@@ -87,7 +87,10 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 
 ## 7. 待定决策
 
-- 安全边界：插件可信代码（同进程）vs 隔离进程
-- 插件来源：本地文件 vs 远程分发（版本/签名）
 - AOT vs JIT：Roslyn 动态编译与 NativeAOT 互斥
 - context 并发模型：串行处理（吞吐受限）vs 并行 + 同步
+
+安全边界与插件来源已由 [ADR-0001](../decisions/adr-0001-plugin-security-and-source.md) 收敛为已决：
+
+- 安全边界：同进程可信代码（默认），`IPluginHost` 扩展点预留隔离进程
+- 插件来源：本地文件（初始），经 `IPluginSource` 演进（版本记录 → 签名校验 → 远程分发）
