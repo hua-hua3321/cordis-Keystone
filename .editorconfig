@@ -1,0 +1,179 @@
+# P0 代码风格约束（标准 C# 14 风格）：把常犯错误扼杀在摇篮
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{cs,csx}]
+indent_style = space
+indent_size = 4
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_between_query_expression_clauses = true
+csharp_indent_case_contents = true
+csharp_space_after_cast = false
+csharp_space_after_keywords_in_control_flow_statements = true
+csharp_space_between_method_declaration_parameter_list_parentheses = false
+csharp_space_between_method_call_parameter_list_parentheses = false
+
+# ---- 风格规则（EnforceCodeStyleInBuild 生效）----
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+dotnet_style_require_compiler_service = true:suggestion
+dotnet_style_prefer_auto_properties = true:suggestion
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+dotnet_style_prefer_conditional_expression_over_assignment = true:suggestion
+dotnet_style_prefer_conditional_expression_over_return = true:suggestion
+dotnet_style_prefer_compound_assignment = true:suggestion
+dotnet_style_prefer_foreach_explicit_cast_in_source = true:suggestion
+dotnet_style_prefer_simplified_interpolation = true:suggestion
+dotnet_style_namespace_match_folder = true:suggestion
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_constructors = false:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_indexers = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+csharp_style_expression_bodied_lambdas = true:suggestion
+csharp_style_expression_bodied_local_functions = false:suggestion
+csharp_style_throw_expression = true:suggestion
+csharp_style_prefer_switch_expression = true:suggestion
+csharp_style_prefer_pattern_matching = true:suggestion
+csharp_style_pattern_matching_over_as_with_null_check = true:suggestion
+csharp_style_conditional_delegate_call = true:suggestion
+csharp_style_prefer_extended_property_pattern = true:suggestion
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_style_prefer_utf8_string_literals = true:suggestion
+
+# ---- 命名约定 ----
+dotnet_naming_rule_types_should_be_pascal_case.severity = error
+dotnet_naming_rule_types_should_be_pascal_case.symbols = types
+dotnet_naming_rule_types_should_be_pascal_case.style = pascal_case
+dotnet_naming_symbols.types.applicable_kinds = class, struct, interface, enum, delegate
+dotnet_naming_symbols.types.applicable_accessibilities = public, internal, private, protected
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
+dotnet_naming_rule_local_functions_should_be_pascal_case.severity = error
+dotnet_naming_rule_local_functions_should_be_pascal_case.symbols = local_functions
+dotnet_naming_rule_local_functions_should_be_pascal_case.style = pascal_case
+dotnet_naming_symbols.local_functions.applicable_kinds = local_function
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
+dotnet_naming_rule_private_fields_should_be_underscore_camel.severity = error
+dotnet_naming_rule_private_fields_should_be_underscore_camel.symbols = private_fields
+dotnet_naming_rule_private_fields_should_be_underscore_camel.style = underscore_camel
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+
+dotnet_naming_rule_locals_should_be_camel.severity = error
+dotnet_naming_rule_locals_should_be_camel.symbols = locals
+dotnet_naming_rule_locals_should_be_camel.style = camel
+dotnet_naming_symbols.locals.applicable_kinds = local, parameter
+dotnet_naming_style.camel.capitalization = camel_case
+
+dotnet_naming_rule_constants_should_be_pascal.severity = error
+dotnet_naming_rule_constants_should_be_pascal.symbols = constants
+dotnet_naming_rule_constants_should_be_pascal.style = pascal_case
+dotnet_naming_symbols.constants.applicable_kinds = field
+dotnet_naming_symbols.constants.required_modifiers = const
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
+# ---- IDE 规则（常见错误 → error）----
+dotnet_diagnostic.IDE0005.severity = error                 # 未使用的 using（清理）
+dotnet_diagnostic.IDE0011.severity = error                 # 花括号必须
+dotnet_diagnostic.IDE0044.severity = error                 # readonly 字段
+dotnet_diagnostic.IDE0055.severity = error                 # 格式错误
+dotnet_diagnostic.IDE0060.severity = suggestion            # 未使用参数（留给 CA1801 语义）
+dotnet_diagnostic.IDE0130.severity = suggestion            # 命名空间与目录匹配
+
+# ---- .NET 分析器：杀常见错误（error 级精选）----
+dotnet_diagnostic.CA1031.severity = error                  # 禁止裸 catch（ExceptionalFilter 除外）
+dotnet_diagnostic.CA1062.severity = error                  # 公共方法参数校验
+dotnet_diagnostic.CA1812.severity = error                  # 未实例化的内部类
+dotnet_diagnostic.CA1822.severity = suggestion             # 可静态化成员（不强制）
+dotnet_diagnostic.CA1848.severity = error                  # 日志用 LoggerMessage 源生成（勿热路径拼接）
+dotnet_diagnostic.CA2000.severity = error                  # IDisposable 泄漏
+dotnet_diagnostic.CA2007.severity = error                  # 库代码必须 ConfigureAwait(false)
+dotnet_diagnostic.CA2012.severity = error                  # ValueTask 多次使用
+dotnet_diagnostic.CA2016.severity = error                  # CopyTo 传 CancellationToken
+dotnet_diagnostic.CA2211.severity = error                  # 非常量静态字段（可变全局）
+dotnet_diagnostic.CA2227.severity = error                  # 集合属性不应只读 set
+dotnet_diagnostic.CA2254.severity = error                  # 日志模板占位符（勿拼接消息）
+dotnet_diagnostic.CA1861.severity = error                  # 常量数组勿每次新建
+dotnet_diagnostic.CA1852.severity = error                  # 内部类未密封（性能）
+dotnet_diagnostic.CA1724.severity = error                  # 类型名与命名空间冲突
+dotnet_diagnostic.CA1716.severity = none                   # Get/Set/Provide 是 10 §4 既定 API 面，非多语言互操作目标
+dotnet_diagnostic.CA1032.severity = error                  # 异常实现标准构造器
+
+# ---- 编码纪律（P0）：禁止硬编码 ----
+# 运行期可变值一律走配置（CordisSettings / 插件配置）；本规则由代码评审 + 配置抽象保证，
+# 另见 AGENTS.md"编码纪律"与 ADR-0013。编辑器提示用 IDE0058 不适用，此处仅记录约定。
+
+# ---- 测试工程豁免（xunit 语义与库代码不同）----
+[tests/**/*.cs]
+dotnet_diagnostic.CA2007.severity = none     # 测试无需 ConfigureAwait
+dotnet_diagnostic.CA1062.severity = none     # 测试参数无需校验
+dotnet_diagnostic.CA1812.severity = none     # xunit 测试类由框架实例化
+dotnet_diagnostic.CA1852.severity = none     # 测试类不要求 sealed
+dotnet_diagnostic.CA1031.severity = none     # 测试允许宽 catch
+dotnet_diagnostic.CA2000.severity = none     # 测试临时对象
+dotnet_diagnostic.CA1707.severity = none     # xunit 命名用下划线（方法名风格）
+dotnet_diagnostic.CS0067.severity = none     # 测试 fake 中未触发的接口事件
+
+# ---- 事件总线并行聚合：handler 可抛任意异常，统一转 faulted task 聚合（ADR-0006）----
+[src/Keystone.Runtime/Events/EventBus.cs]
+dotnet_diagnostic.CA1031.severity = none
+
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.{json,md}]
+indent_style = space
+indent_size = 2
+
+# ---- 插件运行时：初始化失败捕获任意异常进入 FAILED 态（ADR-0005）----
+[src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs]
+dotnet_diagnostic.CA1031.severity = none
+
+# ---- 管道：RequestDelegate 是 04 §2 既定名称（ASP.NET Core 同款委托命名）----
+[src/Keystone.Runtime/Pipeline/RequestDelegate.cs]
+dotnet_diagnostic.CA1711.severity = none
+
+# ---- 插件加载层（ADR-0002 刻意排除在 AOT 标准之外的唯一区域）：Roslyn/ALC/反射属预期 ----
+[src/Keystone.Runtime/Plugins/Loading/*.cs]
+dotnet_diagnostic.IL2026.severity = none
+dotnet_diagnostic.IL2072.severity = none
+dotnet_diagnostic.IL2075.severity = none
+
+# ---- 重试策略：handler 可抛任意异常需重试（05 §4）----
+[src/Keystone.Runtime/Reliability/RetryPolicy.cs]
+dotnet_diagnostic.CA1031.severity = none
+
+# 测试日志调用允许直接 ILogger 扩展方法
+[tests/**/*.cs]
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA1873.severity = none
+
+# ---- 文件事件存储：await using 的 dispose ConfigureAwait 无意义（ConfiguredAsyncDisposable 破坏读写访问）----
+[src/Keystone.Runtime/Persistence/FileEventStore.cs]
+dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.MA0004.severity = none
+
+# ---- SDK 计时器：回调可抛任意异常，计时器回调不崩溃宿主 ----
+[src/Keystone.Sdk/Timers/TimerExtensions.cs]
+dotnet_diagnostic.CA1031.severity = none

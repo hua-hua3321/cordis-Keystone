@@ -1,1 +1,8 @@
 .worktrees/
+bin/
+obj/
+.tools/
+.nuget/
+*.user
+.vs/
+.idea/

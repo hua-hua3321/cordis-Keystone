@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Keystone.AI/Keystone.AI.csproj" />
+    <Project Path="src/Keystone.Config/Keystone.Config.csproj" />
+    <Project Path="src/Keystone.Core/Keystone.Core.csproj" />
+    <Project Path="src/Keystone.Hosting/Keystone.Hosting.csproj" />
+    <Project Path="src/Keystone.Runtime/Keystone.Runtime.csproj" />
+    <Project Path="src/Keystone.Sdk/Keystone.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Keystone.AI.Tests/Keystone.AI.Tests.csproj" />
+    <Project Path="tests/Keystone.Config.Tests/Keystone.Config.Tests.csproj" />
+    <Project Path="tests/Keystone.Core.Tests/Keystone.Core.Tests.csproj" />
+    <Project Path="tests/Keystone.Hosting.Tests/Keystone.Hosting.Tests.csproj" />
+    <Project Path="tests/Keystone.Runtime.Tests/Keystone.Runtime.Tests.csproj" />
+    <Project Path="tests/Keystone.Sdk.Tests/Keystone.Sdk.Tests.csproj" />
+  </Folder>
+</Solution>
