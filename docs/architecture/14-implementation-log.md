@@ -65,6 +65,7 @@ created: 2026-08-15
 | P35 文档达标 DC-3/DC-6 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | quiesce 入口拒绝+超时审计 + rebind 报错+热重载顺序（§7.35，244/244 全绿） | §7.35 |
 | P36 文档达标 DC-5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 依赖超时接线（§7.36：依赖永不就绪→FAILED，246/246 全绿） | §7.36 |
 | P37 文档达标 DC-4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 监督策略（§7.37：OneForOne + 重启计数 + 超阈值停止，248/248 全绿） | §7.37 |
+| P38 文档达标 DC-8 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 静态插值接线（§7.38：!!env/!!file tag 语法 + 环检测 + 宿主提供者注入，258/258 全绿） | §7.38 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -143,6 +144,7 @@ created: 2026-08-15
 | ID-30 | 2026-08-15 | P35 | 文档达标 DC-3/DC-6：①全局 quiesce 补入口拒绝 + 总超时 + 未收敛审计（09 §4）；②rebind 重复注册报错 + 热重载先卸载再启动（02 §3/ADR-0007） | 兑现 09 §4 六步关闭语义与 rebind 语义；热重载顺序修复防同名注册冲突/误删 | `KeystoneHost`、`KeystoneHostOptions`、`ServiceRegistry`、`PluginLoader` | 否（17-doc-compliance-audit DC-3/DC-6） |
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 | ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
+| ID-33 | 2026-08-16 | P38 | 静态插值双层形态（DC-8，ADR-0012）：YAML 整值标量走 tag 形态（!!env NAME/!!file path，YamlDotNet TagName）；文本内容内引用走冒号前缀形态（!!env:NAME）；缺失保留标记（tag 形态重构为 `!!env NAME` 字符串，不静默替换）；环检测 visited 改展开栈语义（add→递归→remove，同文件多处引用非环） | ADR-0012 tag 机制保留（YamlDotNet 自定义 tag）；字符串中间嵌入标记不支持（ADR 示例均为整值）；原实现 visited 只增不减（误报环） | `src/Keystone.Config/Interpolation/StaticInterpolator.cs`、`Entries/EntryParser.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-8） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -626,6 +628,17 @@ created: 2026-08-15
 
 > **审计发现**：30 项差距集中在"功能实现了但未按文档接线/语义简化"（quiesce 五步缺拒绝/排空、监督缺失、超时熔断死代码、分层叠加孤立、静态插值死代码、事件持久化孤立、管道无原子替换等）——见 17-doc-compliance-audit.md（待产出）。
 
+### 7.38 P38 文档达标 DC-8：静态插值接线
+
+> 17-doc-compliance-audit DC-8（❌→✅）：StaticInterpolator 零调用 + EntryParser 丢 tag（冒号语法偏差）。本次接通：tag 语法展开 + 环检测 + 宿主提供者注入（ADR-0012/08 §4 兑现）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-16 | W38-01 | StaticInterpolator 增 `InterpolateTagged`（EnvTag/FileTag，tag:yaml.org,2002:*）+ 缺失保留标记 + visited 展开栈语义（add→递归→remove，同文件多处引用非环） | 实现（TDD） | DC-8；ADR-0012；ID-33 | `src/Keystone.Config/Interpolation/StaticInterpolator.cs` | `EntryParserInterpolationTests`（8） | ✅ |
+| 2026-08-16 | W38-02 | EntryParser 接插值器：`Parse(string, StaticInterpolator?)` + NodeToObject 对 !!env/!!file tag 标量展开（config 子树；visited 跨整次解析共享） | 实现（TDD） | DC-8；ADR-0012；ID-33 | `src/Keystone.Config/Entries/EntryParser.cs` | 同上（含嵌套结构/无插值器兼容） | ✅ |
+| 2026-08-16 | W38-03 | 宿主接线：KeystoneHostOptions 增 EnvProvider/FileProvider（任一配置即启用）；StartAsync 解析时展开（展开结果进 schema 校验，08 §5） | 实现（TDD） | DC-8；08 §5 | `src/Keystone.Hosting/KeystoneHostOptions.cs`、`KeystoneHost.cs` | `InterpolatedConfigTests`（2） | ✅ |
+| 2026-08-16 | W38-04 | 全量回归 258/258 + Config/Hosting AOT 发布零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` × 2 | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -725,6 +738,8 @@ created: 2026-08-15
 | ID-31 | DC-5 | `Runtime/Plugins/Lifecycle/PluginRuntime.cs` | W36-01~02 |
 | W37-01 | ID-32 | `Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | `SupervisionPolicyTests`（2） |
 | ID-32 | 05 §2；09 §3 | `Actors/`（监督策略） | W37-01~02 |
+| W38-01~03 | ID-33 | `Config/Interpolation/StaticInterpolator.cs`、`Config/Entries/EntryParser.cs`、`Hosting/KeystoneHostOptions.cs`、`Hosting/KeystoneHost.cs` | `EntryParserInterpolationTests`（8）+ `InterpolatedConfigTests`（2） |
+| ID-33 | ADR-0012；DC-8 | `Config/Interpolation/`、`Config/Entries/`、`Hosting/` | W38-01~04 |
 
 ## 9. 维护规则
 

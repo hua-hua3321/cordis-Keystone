@@ -26,6 +26,18 @@ public sealed class KeystoneHostOptions
     /// <summary>配置解析过滤器链（M3 管线，可否决；空 = 无过滤器）。</summary>
     public IReadOnlyList<IConfigFilter> ConfigFilters { get; set; } = [];
 
+    /// <summary>
+    /// 环境变量提供者（DC-8，ADR-0012）：<c>!!env NAME</c> tag 静态插值。
+    /// null（默认）= 不展开环境变量；缺失的环境变量保留 <c>!!env NAME</c> 标记。
+    /// </summary>
+    public Func<string, string?>? EnvProvider { get; set; }
+
+    /// <summary>
+    /// 文件内容提供者（DC-8，ADR-0012）：<c>!!file path</c> tag 静态插值（内容递归插值 + 环检测）。
+    /// null（默认）= 不展开文件引用；缺失的文件保留 <c>!!file path</c> 标记。
+    /// </summary>
+    public Func<string, string?>? FileProvider { get; set; }
+
     /// <summary>是否启用能力域（01 §2 管理层职责；默认开启，纯生命周期宿主可关闭）。</summary>
     public bool EnableCapabilityDomain { get; set; } = true;
 

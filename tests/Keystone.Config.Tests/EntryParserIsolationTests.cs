@@ -5,7 +5,7 @@ namespace Keystone.Config.Tests;
 
 /// <summary>
 /// 解耦隔离验收（15-decoupling-plan D2，C3）：EntryParser 公共 API 不泄漏 YamlDotNet 类型。
-/// 解析入口 <see cref="EntryParser.Parse(string)"/> 返回纯框架类型；YamlNode 转换细节为 private。
+/// 解析入口 <see cref="EntryParser.Parse(string, Keystone.Config.Interpolation.StaticInterpolator?)"/> 返回纯框架类型；YamlNode 转换细节为 private。
 /// </summary>
 public class EntryParserIsolationTests
 {

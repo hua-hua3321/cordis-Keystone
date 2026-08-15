@@ -9,7 +9,7 @@ created: 2026-08-15
 > 触发：用户指出"要根据文档里面的要求来做"，P33 暴露实现是文档的近似而非要求（如 01 §4 每实例持久 context 被简化为每请求新建）。
 > 方法：workflow 并行 5 子代理，逐项对照架构文档（00-16）与 ADR-0001~0015 的**可验证承诺** vs 当前实现。
 > 结果：30 项差距（5 域 × 6，全 ⚠️/❌），集中在"功能实现了但未按文档接线/语义简化"。
-> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）**；🟡 中危与其余高危按 §4 计划排期。
+> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 推进中：DC-8 ✅（P38）**；其余按 §4 计划排期。
 
 ## 1. 审计方法
 
@@ -30,7 +30,7 @@ created: 2026-08-15
 | DC-5 | 05 §3/§4 | 超时/熔断/重试接入运行链 | **✅ 部分（P36）**：依赖等待超时 → FAILED（DependencyWaitTimeout 接线）；TimeoutPolicy/RetryPolicy/CircuitBreaker 其余调用点待接 | ⚠️ |
 | DC-6 | 02 §3、ADR-0007 | rebind=报错 + 热重载服务保持 | **✅ 已修复（P35）**：Register 重复（他属主）报错；热重载先卸载再启动 | ✅ |
 | DC-7 | 08 §4 | 配置分层叠加（base/profile/patch/overlay + 环境选择） | ApplyLayers 孤立工具类；宿主只吃单 YAML 字符串 | ❌ |
-| DC-8 | ADR-0012 | !!env/!!file 静态插值（YAML tag 语法 + 无环检测 + 展开后校验） | StaticInterpolator 冒号语法 + 零调用；EntryParser 丢 tag | ❌ |
+| DC-8 | ADR-0012 | !!env/!!file 静态插值（YAML tag 语法 + 无环检测 + 展开后校验） | **✅ 已修复（P38）**：EntryParser 接 StaticInterpolator（!!env NAME/!!file path tag 展开，缺失保留标记，visited 环检测跨整次解析）；宿主 EnvProvider/FileProvider 注入（展开后进 schema 校验） | ✅ |
 | DC-9 | 08 §6 | 文件变更→重载→diff→逐条目更新 + 写回管线 | 无配置 watcher/diff；热更新退化为 API 调用 | ⚠️ |
 | DC-10 | 04 §8、ADR-0003 | 管道原子替换（swap）+ 在途排空 + 保留 actor/context | 管道每请求重建，节点 spawn 固化，无 swap API | ❌ |
 | DC-11 | ADR-0009 | 事实事件持久化接入运行链 | IEventStore 孤立；EventBus/PluginRuntime 不写存储 | ❌ |
@@ -64,7 +64,7 @@ created: 2026-08-15
 | P0 | DC-4 | Spawn 配置监督策略（重启计数 + 退避 + 升级） | 中 |
 | P0 | DC-5 | 超时/熔断/重试接入运行链（初始化超时/依赖超时/管道超时） | 中 |
 | P0 | DC-6 | Register 重复报错 + 热重载注册隔离 | 小 |
-| P1 | DC-8 | StaticInterpolator 接 EntryParser（tag 语法）+ 无环检测 | 中 |
+| P1 | DC-8 | StaticInterpolator 接 EntryParser（tag 语法）+ 无环检测 | ✅ 已修复（P38） |
 | P1 | DC-11 | EventBus/PluginRuntime 事实事件写入 IEventStore | 中 |
 | P1 | DC-10 | 管道实例化缓存 + swap API（原子替换） | 中 |
 | P1 | DC-7 | 宿主接分层叠加（base/patch 组装） | 中 |

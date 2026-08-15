@@ -52,8 +52,9 @@ public sealed class KeystoneHost : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(configYaml);
 
-        // 1. 配置层：条目解析（含重复 id fail-fast）
-        var entries = EntryParser.Parse(configYaml);
+        // 1. 配置层：条目解析（含重复 id fail-fast；DC-8：!!env/!!file tag 静态插值，ADR-0012）
+        var interpolator = BuildInterpolator();
+        var entries = EntryParser.Parse(configYaml, interpolator);
         _tree.Clear();
         _tree.AddRange(entries);
 
@@ -409,6 +410,14 @@ public sealed class KeystoneHost : IAsyncDisposable
         return resolved as IReadOnlyDictionary<string, object?>
             ?? new Dictionary<string, object?>(StringComparer.Ordinal) { ["value"] = resolved };
     }
+
+    /// <summary>DC-8：按选项构建静态插值器（任一提供者配置才启用；否则 null = 不插值）。</summary>
+    private Keystone.Config.Interpolation.StaticInterpolator? BuildInterpolator()
+        => _options.EnvProvider is not null || _options.FileProvider is not null
+            ? new Keystone.Config.Interpolation.StaticInterpolator(
+                _options.EnvProvider ?? (_ => null),
+                _options.FileProvider ?? (_ => null))
+            : null;
 
     private static IEnumerable<EntryOptions> EnumerateLeaves(IEnumerable<EntryOptions> entries)
     {
