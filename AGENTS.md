@@ -53,6 +53,7 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 | [architecture/12-cordis-semantics-mapping.md](architecture/12-cordis-semantics-mapping.md) | 语义映射参考：被弃用/未解析 Cordis 机制（intercept/check、H/M/L/F 系列）的 C# 对应物字典 + 导出面穷举审计凭证 | 标准 |
 | [architecture/13-implementation-plan.md](architecture/13-implementation-plan.md) | 分阶段实施计划：M0-M13 里程碑、每阶段目标/验收条件/DoD、待定项分配 | 标准 |
 | [architecture/14-implementation-log.md](architecture/14-implementation-log.md) | 实施记录：工作日志/实现期决策/偏差/验收台账/三向回溯索引（与 13 配套） | 标准 |
+| [architecture/15-decoupling-plan.md](architecture/15-decoupling-plan.md) | 解耦工作计划：第三方依赖耦合审计（C1-C8）+ 分阶段隔离计划（D1-D5） | 标准 |
 | [decisions/](decisions/README.md) | 决策记录（ADR-0001 ~ 0015，设计期已收敛；实现期新决策走 14 §4 通道） | accepted |
 
 ## 治理
@@ -63,10 +64,10 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 
 ## 加工件说明（看板流水线使用）
 
-当前阶段：**实现期完成（M0-M13 全部通过，195 测试全绿）+ P14 MCP 协议层落地（ADR-0008 决策 4 延迟项：MAF Mcp 无稳定版 → 协议层组合官方稳定 SDK ModelContextProtocol.Core 2.2.0）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
+当前阶段：**实现期完成（M0-M13 全部通过，196 测试全绿）+ P14 MCP 协议层落地 + P15 解耦审计（C1-C8 清单与 D1-D5 计划见 15-decoupling-plan，执行待排期）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
 
 - 构建：`dotnet build cordis-csharp.slnx`（已存在；警告即错误）
-- 测试：`dotnet test cordis-csharp.slnx`（已存在；195 个单测绿，M0-M13 全阶段 + P14）
+- 测试：`dotnet test cordis-csharp.slnx`（已存在；196 个单测绿，M0-M13 全阶段 + P14）
 - **实现纪律（13 §6）**：TDD 测试先行（红→绿→重构）；设计模式 + 契约/错误/实现边界抽象隔离；跨层单向依赖
 - 文档校验：`cd ~/Projects/central-governance && python3 scripts/validate_frontmatter.py`
 - 设计文档改动必须同步：AGENTS.md 索引、docs/architecture/ 对应文档、decisions/ ADR
