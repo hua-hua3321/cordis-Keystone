@@ -28,6 +28,8 @@ status: accepted
 - 每个跨域消息类型声明 `[MessagePackObject]`（或契约标记），序列化是显式边界行为
 - 域内保持强类型直接调用（`01-overview.md` §6 的克制边界：不强制全 actor 化）
 
+> **实现备注（2026-08-15，P17，见 14-implementation-log §7.17 / ID-15）**：序列化动作经 `IContractSerializer` 抽象（`Keystone.Core/Serialization/`）——默认 `MessagePackContractSerializer`，可注入 `JsonContractSerializer`（STJ 源生成上下文，调试/审计）。跨域边界当前走 Proto.Actor 同进程引用传递（无实际序列化，`[MessagePackObject]` 保留为契约声明）；抽象的首个消费点是事件持久化（`FileEventStore` 构造器注入，ADR-0009）。AOT 安全：仅源生成实现，禁反射。
+
 ### 决策 2：跨域编排 — TaskId 贯穿 + 子任务聚合（父任务等待全部子任务）
 
 **TaskId 贯穿**：父任务创建子任务时，子任务携带 `ParentTaskId`，TaskId 链贯穿整个编排树（`06-contracts.md` §3 的链路追踪扩展）。

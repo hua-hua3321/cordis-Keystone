@@ -53,16 +53,11 @@ created: 2026-08-15
 - **决策通道**：无需（纯可见性收敛，无行为变化）
 - **风险**：极低
 
-### 阶段 D3：序列化器抽象（C6，🟡）
+### 阶段 D3：序列化器抽象（C6，🟡）—— ✅ 已执行（P17，2026-08-15）
 
 - **目标**：兑现 ADR-0004"MessagePack 默认 / JSON 可配置"，序列化器不钉死契约
-- **设计方向**（需评估，工作量中等）：
-  - 方案 A（轻）：契约保留 `[MessagePackObject]`，新增 `IContractSerializer` 抽象（Serialize/Deserialize），默认 MessagePack 实现，JSON 实现供调试；跨域边界走抽象
-  - 方案 B（重）：契约去框架特性，改为源生成友好的纯 record + 显式 `IContractSerializer` 注册（MessagePack 源生成 / STJ 源生成）
-  - 倾向 A：契约特性是 MessagePack 源生成的要求（规则 0 第 3 条），方案 B 需双源生成器共存，复杂
-- **验收**：跨域序列化经 `IContractSerializer`；JSON 实现存在且可注入；现有信封测试全绿
-- **决策通道**：**需 ADR**（修正 ADR-0004 或补充实现细节——"可配置"承诺的落地方式）
-- **风险**：序列化是跨域热路径，抽象层不得引入反射（规则 0）；测试基建更新
+- **调研结论**：跨域边界（Proto.Actor 同进程引用传递）无实际序列化，`[MessagePackObject]` 是契约声明；唯一执行序列化的消费点是 FileEventStore（事件持久化）→ 抽象应用到该通道
+- **落地**（14 §7.17 / ID-15）：方案 A——`IContractSerializer`（泛型 + 源生成 AOT 安全）+ `MessagePackContractSerializer`（默认）+ `JsonContractSerializer`（STJ 源生成上下文注入）；`FileEventStore` 构造器可选注入（默认 MessagePack 兼容）。205/205 全绿 + Core/Runtime AOT 零 IL 警告。
 
 ### 阶段 D4：AI 组合层 API 收敛 + 死依赖清理（C4+C7+C8，🟡/🟢）
 
@@ -86,8 +81,8 @@ created: 2026-08-15
 | 优先级 | 阶段 | 理由 |
 |--------|------|------|
 | P0 | D1（C1+C1b+C2） | ✅ 已执行（P16）：公共 API 被迫引用 Proto.Actor + 能力域 actor 是生产死代码 + 架构 01/09 承诺（监督/多实例）未兑现，影响宿主嵌入形态 |
-| P1 | D3（C6+C6b） | ADR-0004 承诺与实现差距，序列化是可配置性核心（下一阶段） |
-| P2 | D2（C3） | API 整洁度，零成本（可见性收敛） |
+| P1 | D3（C6+C6b） | ✅ 已执行（P17）：IContractSerializer 抽象兑现 ADR-0004，应用到事件持久化 |
+| P2 | D2（C3） | API 整洁度，零成本（可见性收敛）（下一阶段） |
 | P2 | D4（C4+C8） | 边界明确 + 死依赖清理，工作量小 |
 | — | D5 | 每阶段内闭环，不单独排期 |
 
@@ -95,8 +90,9 @@ created: 2026-08-15
 
 - [x] 独立复核子代理结果已合入（修正 C3、新增 C1b/C6b/C8）
 - [x] 阶段 D1 已执行（P16，14 §7.16/ID-14）
-- [ ] 阶段 D3 开工（序列化抽象，ADR 通道确认方案）
-- [ ] 阶段 D2/D4 开工
+- [x] 阶段 D3 已执行（P17，14 §7.17/ID-15）
+- [ ] 阶段 D2 开工（EntryParser 可见性收敛）
+- [ ] 阶段 D4 开工（AI 层边界 + Workflows 死依赖）
 - [ ] 每阶段按 13 §6 纪律执行：测试先行 + 决策沉淀 + 文档同步
 
 ## 关联

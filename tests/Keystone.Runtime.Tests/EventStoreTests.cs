@@ -1,8 +1,13 @@
+using System.Text.Json.Serialization;
 using Keystone.Runtime.Persistence;
 using Keystone.Core.Contracts;
 using MessagePack;
 
 namespace Keystone.Runtime.Tests;
+
+/// <summary>STJ 源生成上下文（测试专用，含 StoredFact——JSON 注入验证）。</summary>
+[JsonSerializable(typeof(StoredFact))]
+public sealed partial class EventJsonContext : JsonSerializerContext;
 
 public class InMemoryEventStoreTests
 {
@@ -106,6 +111,32 @@ public class FileEventStoreTests : IDisposable
         }
 
         GC.SuppressFinalize(this);
+    }
+
+    [Fact]
+    public async Task Append_reopen_with_injected_json_serializer_roundtrips()
+    {
+        // 15-decoupling-plan D3（C6）：事件持久化经 IContractSerializer 抽象——注入 JSON 实现
+        // （ADR-0004 "JSON 可配置" 兑现；审计/调试场景可读）
+        var path = Path.Combine(_directory, "events.json.bin");
+        var jsonSerializer = new Keystone.Core.Serialization.JsonContractSerializer(EventJsonContext.Default);
+
+        await using (var store = new FileEventStore(path, jsonSerializer))
+        {
+            await store.AppendAsync(InMemoryEventStoreTests.Fact("json-a"));
+            await store.AppendAsync(InMemoryEventStoreTests.Fact("json-b"));
+        }
+
+        await using var reopened = new FileEventStore(path, jsonSerializer);
+        var replayed = new List<StoredFact>();
+        await foreach (var fact in reopened.ReplayAsync(new ReplayQuery(), CancellationToken.None))
+        {
+            replayed.Add(fact);
+        }
+
+        Assert.Equal(2, replayed.Count);
+        Assert.Equal("json-a", replayed[0].EventName);
+        Assert.Equal("json-b", replayed[1].EventName);
     }
 
     [Fact]

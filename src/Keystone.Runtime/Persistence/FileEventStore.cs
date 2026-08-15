@@ -1,23 +1,26 @@
 using System.Buffers.Binary;
-using MessagePack;
+using Keystone.Core.Serialization;
 
 namespace Keystone.Runtime.Persistence;
 
 /// <summary>
-/// 本地文件事件存储（ADR-0009 默认实现）：帧格式 = 4 字节大端长度 + MessagePack 字节。
+/// 本地文件事件存储（ADR-0009 默认实现）：帧格式 = 4 字节大端长度 + 序列化字节。
+/// 序列化经 <see cref="IContractSerializer"/> 抽象（ADR-0004：默认 MessagePack，可注入 JSON 审计）。
 /// append-only（FileMode.Append + 追加锁串行）；崩溃恢复 = 忽略损坏尾帧（完整前缀可恢复）；
 /// 每次追加 FlushAsync（帧完整性）。
 /// </summary>
 public sealed class FileEventStore : IEventStore
 {
     private readonly string _path;
+    private readonly IContractSerializer _serializer;
     private readonly SemaphoreSlim _appendLock = new(1, 1);
     private long _sequence;
 
-    public FileEventStore(string path)
+    public FileEventStore(string path, IContractSerializer? serializer = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = path;
+        _serializer = serializer ?? new MessagePackContractSerializer();
         _sequence = LoadSequence();
     }
 
@@ -30,7 +33,7 @@ public sealed class FileEventStore : IEventStore
         {
             _sequence++;
             var stored = fact with { Sequence = _sequence };
-            var payload = MessagePackSerializer.Serialize(stored, cancellationToken: cancellationToken);
+            var payload = _serializer.Serialize(stored);
             var header = new byte[4];
             BinaryPrimitives.WriteInt32BigEndian(header, payload.Length);
 
@@ -80,7 +83,7 @@ public sealed class FileEventStore : IEventStore
                 yield break; // 尾部损坏帧：丢弃（崩溃恢复语义）
             }
 
-            var fact = MessagePackSerializer.Deserialize<StoredFact>(payload, cancellationToken: cancellationToken);
+            var fact = _serializer.Deserialize<StoredFact>(payload);
             if (Match(query, fact))
             {
                 yield return fact;
@@ -112,7 +115,7 @@ public sealed class FileEventStore : IEventStore
             {
                 foreach (var fact in kept)
                 {
-                    var payload = MessagePackSerializer.Serialize(fact, cancellationToken: cancellationToken);
+                    var payload = _serializer.Serialize(fact);
                     var header = new byte[4];
                     BinaryPrimitives.WriteInt32BigEndian(header, payload.Length);
                     await stream.WriteAsync(header, cancellationToken).ConfigureAwait(false);
@@ -167,7 +170,7 @@ public sealed class FileEventStore : IEventStore
                     break; // 损坏尾（崩溃残留）：忽略
                 }
 
-                last = MessagePackSerializer.Deserialize<StoredFact>(payload, cancellationToken: CancellationToken.None).Sequence;
+                last = _serializer.Deserialize<StoredFact>(payload).Sequence;
             }
         }
 
