@@ -46,6 +46,7 @@ created: 2026-08-15
 | P16 解耦 D1 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 能力域接线 + Proto 隔离（§7.16：C1/C1b/C2 闭合，200/200 全绿） | §7.16 |
 | P17 解耦 D3 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 序列化器抽象（§7.17：C6 闭合，IContractSerializer + JSON 注入，205/205 全绿） | §7.17 |
 | P18 解耦 D2 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 配置解析面收敛（§7.18：C3 闭合，EntryParser 零 YamlDotNet 泄漏，206/206 全绿） | §7.18 |
+| P19 解耦 D4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | AI 层边界 + Workflows 死依赖清理（§7.19：C8 闭合，C4 记录保持，206/206 全绿） | §7.19 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -108,6 +109,7 @@ created: 2026-08-15
 | ID-14 | 2026-08-15 | P16 | 能力域隔离形态（15-plan D1）：CapabilityDomain 构造器私有化 + `Create`（自有 ActorSystem）/`Attach`（注入测试缝）；`CapabilityHandle` 封装 PID 作框架句柄；CapabilityActor 降 internal；KeystoneHost 接线（EnableCapabilityDomain 默认开） | 调用方常规路径零 Proto 类型（隔离目标）；Attach 是显式共享 ActorSystem 高级场景（隔离测试豁免）；Create 模式拥有 system 由域释放、Attach 模式调用方管理 | `src/Keystone.Runtime/Actors/`、`src/Keystone.Hosting/` | 否（15-plan D1 备注） |
 | ID-15 | 2026-08-15 | P17 | 序列化器抽象（15-plan D3）：`IContractSerializer` + 默认 MessagePack + 可注入 JSON（STJ 源生成上下文）；应用到事件持久化（FileEventStore 构造器注入） | ADR-0004"JSON 可配置"兑现；跨域边界（Proto.Actor 引用传递）无实际序列化，`[MessagePackObject]` 契约声明保留；唯一消费点=事件持久化；AOT 安全（源生成，禁反射） | `src/Keystone.Core/Serialization/`、`src/Keystone.Runtime/Persistence/FileEventStore.cs` | 否（ADR-0004 备注 + 15-plan D3） |
 | ID-16 | 2026-08-15 | P18 | 配置解析面收敛（15-plan D2）：`EntryParser.NodeToObject` 降 private，YamlDotNet 类型退出公共面 | 无外部调用（仅内部递归）；Parse(string) 返回纯框架类型足够；隔离测试锁定 | `src/Keystone.Config/Entries/EntryParser.cs` | 否（15-plan D2） |
+| ID-17 | 2026-08-15 | P19 | AI 组合层边界（15-plan D4）：①移除 `Microsoft.Agents.AI.Workflows` 死依赖（WorkflowBridge 纯 Task，MAF 图构建未接线前不引）；②`SkillRegistry` 返回 MAF 类型保持（唯一消费方=AI 层内部，组合层预期） | 死依赖违反单向组合克制；C4 按"仅组合层内部消费→保持"标准（与 Mcp 桥不同：Mcp 是框架通用能力需隔离，skills 是 AI 专属） | `Keystone.AI.csproj`、`Directory.Packages.props` | 否（15-plan D4） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -395,6 +397,16 @@ created: 2026-08-15
 | 2026-08-15 | W18-01 | `EntryParser.NodeToObject` 降 private（YamlDotNet 类型退出公共面）；隔离测试：EntryParser 公共静态签名无 YamlDotNet 泄漏 | 重构（TDD） | 15-plan D2 | `src/Keystone.Config/Entries/EntryParser.cs`、`tests/Keystone.Config.Tests/EntryParserIsolationTests.cs` | 隔离测试绿 + 现有 EntryParserTests 全绿 | ✅ |
 | 2026-08-15 | W18-02 | 全量回归 206/206 | 验收 | — | — | `dotnet test` | ✅ |
 
+### 7.19 P19 解耦 D4：AI 组合层边界 + Workflows 死依赖清理（C4/C8）
+
+> 15-decoupling-plan D4（P2）：① C8 死依赖——`Microsoft.Agents.AI.Workflows` 引用零使用（WorkflowBridge 纯 Task 实现）→ 移除引用（计划倾向①）；② C4——`SkillRegistry.FromManifest` 返回 MAF `AgentSkillsSource`，经核实唯一调用方是 AI.Tests（AI 组合层内部消费）→ 保持（组合层预期，ADR-0008 决策 3）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W19-01 | 移除 `Microsoft.Agents.AI.Workflows` 死依赖（csproj + CPM）；验证 assets 无 Workflows 包 | 重构 | 15-plan D4/C8；ID-17 | `src/Keystone.AI/Keystone.AI.csproj`、`Directory.Packages.props` | restore 绿 + assets 断言无 Workflows | ✅ |
+| 2026-08-15 | W19-02 | C4 边界确认：`SkillRegistry.FromManifest` 消费方仅 AI.Tests（组合层内部）→ 保持返回 MAF 类型，文档声明边界 | 评估 | ADR-0008 决策 3；15-plan D4 | `src/Keystone.AI/Skills/SkillRegistry.cs` | 无改动（记录保持） | ✅ |
+| 2026-08-15 | W19-03 | 全量回归 206/206 + Keystone.AI AOT 发布零 IL 警告（移除 Workflows 后） | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -452,6 +464,8 @@ created: 2026-08-15
 | ID-15 | ADR-0004 | `Core/Serialization/`、`Runtime/Persistence/` | W17-01~03 |
 | W18-01 | ID-16 | `Config/Entries/EntryParser.cs` | `EntryParserIsolationTests` |
 | ID-16 | 15-plan D2 | `Config/Entries/EntryParser.cs` | W18-01~02 |
+| W19-01 | ID-17 | `Keystone.AI.csproj`、`Directory.Packages.props` | assets 断言无 Workflows |
+| ID-17 | 15-plan D4 | `Keystone.AI/`（csproj/CPM） | W19-01~03 |
 
 ## 9. 维护规则
 

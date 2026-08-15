@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Agents.AI.Workflows" />
+    <!-- MAF 主包（Skills 依赖，ADR-0008）；Workflows 包已移除：WorkflowBridge 为纯 Task 实现（O2 验证），MAF 图构建未接线前不引死依赖（15-plan D4/C8） -->
     <PackageReference Include="Microsoft.Agents.AI" />
     <PackageReference Include="ModelContextProtocol.Core" />
     <PackageReference Include="Meziantou.Analyzer">

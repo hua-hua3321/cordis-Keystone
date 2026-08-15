@@ -56,16 +56,14 @@ created: 2026-08-15
 - **调研结论**：跨域边界（Proto.Actor 同进程引用传递）无实际序列化，`[MessagePackObject]` 是契约声明；唯一执行序列化的消费点是 FileEventStore（事件持久化）→ 抽象应用到该通道
 - **落地**（14 §7.17 / ID-15）：方案 A——`IContractSerializer`（泛型 + 源生成 AOT 安全）+ `MessagePackContractSerializer`（默认）+ `JsonContractSerializer`（STJ 源生成上下文注入）；`FileEventStore` 构造器可选注入（默认 MessagePack 兼容）。205/205 全绿 + Core/Runtime AOT 零 IL 警告。
 
-### 阶段 D4：AI 组合层 API 收敛 + 死依赖清理（C4+C7+C8，🟡/🟢）
+### 阶段 D4：AI 组合层 API 收敛 + 死依赖清理（C4+C7+C8，🟡/🟢）—— ✅ 已执行（P19，2026-08-15）
 
 - **目标**：区分"组合层对外入口"（可暴露 MAF）与"框架通用 API"（不应暴露）；清理死依赖
-- **设计方向**：
-  - `SkillRegistry.FromManifest` 返回类型评估：若仅 AI 组合层内部消费 → 保持；若插件/宿主直接调用 → 加 Keystone 侧薄契约（如 `ISkillSource`）再映射 MAF
-  - `KeystoneSkill : AgentSkill` 保持（组合层预期，C7 记录不动作）
-  - **C8 死依赖**：`Microsoft.Agents.AI.Workflows` 当前零使用——二选一：①移除引用（workflow 域实现期细化后再引）②实现 WorkflowBridge 的 MAF 接线（O2 已在 P12 用纯 Task 验证，MAF 图构建未落地）。倾向①：死依赖违反单向组合的克制原则，等真实接线需求再引
-- **验收**：明确消费边界（谁调 SkillRegistry）；移除或接线 Workflows 依赖；若加契约 → 隔离验证测试
-- **决策通道**：轻量 ID 决策
-- **风险**：低（当前无外部消费）
+- **落地**（14 §7.19 / ID-17）：
+  - **C8 已闭合**：移除 `Microsoft.Agents.AI.Workflows` 死依赖（WorkflowBridge 纯 Task，MAF 图构建未接线前不引）
+  - **C4 记录保持**：`SkillRegistry.FromManifest` 返回 MAF `AgentSkillsSource`——唯一消费方是 AI 层内部（组合层预期，ADR-0008 决策 3）
+  - **C7 记录不动作**：`KeystoneSkill : AgentSkill` 组合层预期
+- **验收**：206/206 全绿 + AI AOT 零 IL 警告（移除 Workflows 后）
 
 ### 阶段 D5：回归闭环
 
@@ -89,7 +87,8 @@ created: 2026-08-15
 - [x] 阶段 D1 已执行（P16，14 §7.16/ID-14）
 - [x] 阶段 D3 已执行（P17，14 §7.17/ID-15）
 - [x] 阶段 D2 已执行（P18，14 §7.18/ID-16）
-- [ ] 阶段 D4 开工（AI 层边界 + Workflows 死依赖）
+- [x] 阶段 D4 已执行（P19，14 §7.19/ID-17：C8 闭合、C4/C7 记录保持）
+- [ ] 阶段 D5 回归闭环（全量 + AOT + 状态更新 + 提交）
 - [ ] 每阶段按 13 §6 纪律执行：测试先行 + 决策沉淀 + 文档同步
 
 ## 关联

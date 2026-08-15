@@ -20,8 +20,7 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" />
     <!-- 能力域 actor（T1，ADR-0015：库自身 AOT 警告例外） -->
     <PackageVersion Include="Proto.Actor" Version="1.8.0" />
-    <!-- AI 组合（ADR-0008：单向依赖，仅 Keystone.AI 引用） -->
-    <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.17.0" />
+    <!-- AI 组合（ADR-0008：单向依赖，仅 Keystone.AI 引用；Workflows 包已移除——WorkflowBridge 纯 Task，15-plan D4/C8） -->
     <PackageVersion Include="Microsoft.Agents.AI" Version="1.17.0" />
     <!-- MCP 协议层（ADR-0008 决策 4：MAF Mcp 未稳定，协议层组合官方稳定 SDK ModelContextProtocol.Core；agent 集成层待 MAF 稳定后接入） -->
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.2.0" />
