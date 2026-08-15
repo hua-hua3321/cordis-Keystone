@@ -8,7 +8,8 @@ namespace Keystone.Config.Persistence;
 public static class EntrySerializer
 {
     public static string Serialize(IReadOnlyList<EntryOptions> entries)
-        => string.Join("\n", entries.Select(SerializeEntry));
+        // 显式 lambda：方法组会绑定 Select 的 (T,int) 索引重载，把元素下标灌进 indent（P45 回归）
+        => string.Join("\n", entries.Select(e => SerializeEntry(e)));
 
     private static string SerializeEntry(EntryOptions entry, int indent = 0)
     {

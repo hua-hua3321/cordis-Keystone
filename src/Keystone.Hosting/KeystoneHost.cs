@@ -23,6 +23,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     private readonly List<Func<PatchContextEventArgs, Func<Task>, Task>> _patchContextHandlers = [];
     private readonly HashSet<string> _failedEntries = new(StringComparer.Ordinal);
     private ContextFacade? _rootContext;
+    private Keystone.Config.Persistence.ConfigFileWriter? _configWriter; // DC-15：CRUD 落盘写回
     private CapabilityDomain? _capabilityDomain;
     private IReadOnlyList<string> _uncollectedPlugins = [];
     private bool _shutdown;
@@ -115,6 +116,16 @@ public sealed class KeystoneHost : IAsyncDisposable
         // DC-3（09 §4）：① 入口拒绝（后续 CreateEntry/Mount/Reload 直接拒绝）
         _shutdown = true;
 
+        // DC-15：排空写回队列（挂起的 CRUD 变更落盘后再 quiesce）
+        try
+        {
+            await FlushConfigAsync().ConfigureAwait(false);
+        }
+        catch (KeystoneException)
+        {
+            // 写回失败（占用/只读）：不阻断关闭（08 §6.3 readonly——报错不崩溃）
+        }
+
         // ② 逐插件 quiesce（ADR-0005 五步闸门），带总关闭超时 + 未收敛审计（09 §4 第 6 步）
         var uncollected = new List<string>();
         using var cts = new CancellationTokenSource(_options.ShutdownTimeout);
@@ -179,10 +190,29 @@ public sealed class KeystoneHost : IAsyncDisposable
     private void NotifyConfigUpdate()
         => ConfigUpdate?.Invoke(this, new ConfigUpdateEventArgs(DumpConfig()));
 
+    // ── DC-15：CRUD 落盘写回管线（09 §5/08 §6.3）──
+
+    /// <summary>CRUD 变更防抖写回（ConfigFilePath 未配置 = 纯内存，无操作）。</summary>
+    private void ScheduleWriteBack()
+    {
+        if (_options.ConfigFilePath is null)
+        {
+            return;
+        }
+
+        NotifyConfigUpdate(); // 配置写回前通知（F9 loader/config-update）
+        _configWriter ??= new Keystone.Config.Persistence.ConfigFileWriter(_options.ConfigFilePath);
+        _configWriter.ScheduleWrite(DumpConfig());
+    }
+
+    /// <summary>冲刷写回队列（测试/嵌入方在关键点确保落盘）。</summary>
+    public Task FlushConfigAsync()
+        => _configWriter?.FlushAsync() ?? Task.CompletedTask;
+
     // ── Hosting API：条目 CRUD（F5）──
 
-    /// <summary>创建条目（加载插件；返回 id；支持 parent 组）。CRUD 返回前插件已就绪（await 收敛）。</summary>
-    public async Task<string> CreateEntryAsync(EntryOptions options, string? parent = null)
+    /// <summary>创建条目（加载插件；返回 id；支持 parent 组 + position 插入位置）。CRUD 返回前插件已就绪（await 收敛）。</summary>
+    public async Task<string> CreateEntryAsync(EntryOptions options, string? parent = null, int? position = null)
     {
         ThrowIfShuttingDown();
         ArgumentNullException.ThrowIfNull(options);
@@ -194,7 +224,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
 
         var entry = options with { Id = id };
-        InsertEntry(_tree, entry, parent);
+        InsertEntry(_tree, entry, parent, position);
         if (entry.IsGroup)
         {
             EntryInit?.Invoke(this, new EntryInitEventArgs(entry)); // 组条目无加载，显式触发
@@ -204,6 +234,7 @@ public sealed class KeystoneHost : IAsyncDisposable
             await LoadEntryAsync(entry).ConfigureAwait(false); // 叶子：LoadEntryAsync 触发
         }
 
+        ScheduleWriteBack();
         return id;
     }
 
@@ -222,10 +253,11 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         RemoveFromTree(_tree, id);
         NotifyConfigUpdate();
+        ScheduleWriteBack();
     }
 
-    /// <summary>跨组移动（失败回滚：先校验目标组存在，再移动）。</summary>
-    public Task MoveEntryAsync(string id, string? newParent)
+    /// <summary>跨组移动/排序（失败回滚：先校验目标组存在，再移动；position 指定插入位置）。</summary>
+    public Task MoveEntryAsync(string id, string? newParent, int? position = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
@@ -240,14 +272,15 @@ public sealed class KeystoneHost : IAsyncDisposable
         RemoveFromTree(_tree, id);
         try
         {
-            InsertEntry(_tree, entry, newParent);
+            InsertEntry(_tree, entry, newParent, position);
         }
         catch (Exception)
         {
-            InsertEntry(_tree, entry, null); // 回滚到根（F5 移动失败回滚）
+            InsertEntry(_tree, entry, null, null); // 回滚到根（F5 移动失败回滚）
             throw;
         }
 
+        ScheduleWriteBack();
         return Task.CompletedTask;
     }
 
@@ -352,6 +385,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         {
             ReplaceEntry(_tree, updated);
             await ReloadPluginAsync(id).ConfigureAwait(false);
+            ScheduleWriteBack(); // 应用成功才落盘（否决不写）
         }).ConfigureAwait(false);
     }
 
@@ -385,6 +419,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await ShutdownAsync().ConfigureAwait(false);
+        _configWriter?.Dispose(); // DC-15：写回器随宿主释放
     }
 
     // ── 内部 ──
@@ -471,7 +506,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
 
         ReplaceEntry(_tree, updated);
-        NotifyConfigUpdate();
+        ScheduleWriteBack();
     }
 
     private static IEnumerable<EntryOptions> EnumerateLeaves(IEnumerable<EntryOptions> entries)
@@ -562,10 +597,16 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
     }
 
-    private static void InsertEntry(List<EntryOptions> entries, EntryOptions entry, string? parent)
+    private static void InsertEntry(List<EntryOptions> entries, EntryOptions entry, string? parent, int? position)
     {
         if (parent is null)
         {
+            if (position is { } index && index >= 0 && index < entries.Count)
+            {
+                entries.Insert(index, entry); // 指定插入位置（09 §5 position 参数）
+                return;
+            }
+
             entries.Add(entry);
             return;
         }
@@ -578,7 +619,18 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
 
         // EntryOptions.Group 是不可变列表——重建组条目
-        var updatedParent = parentEntry with { Group = [.. parentEntry.Group, entry] };
+        List<EntryOptions> children;
+        if (position is { } childIndex && childIndex >= 0 && childIndex < parentEntry.Group.Count)
+        {
+            children = [.. parentEntry.Group];
+            children.Insert(childIndex, entry);
+        }
+        else
+        {
+            children = [.. parentEntry.Group, entry];
+        }
+
+        var updatedParent = parentEntry with { Group = children };
         ReplaceEntry(entries, updatedParent);
     }
 

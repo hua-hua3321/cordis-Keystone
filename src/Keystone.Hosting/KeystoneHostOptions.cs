@@ -44,6 +44,13 @@ public sealed class KeystoneHostOptions
     /// </summary>
     public Keystone.Runtime.Persistence.IEventStore? EventStore { get; set; }
 
+    /// <summary>
+    /// 配置落盘路径（DC-15，09 §5/08 §6.3）：设置后 CRUD 变更经 ConfigFileWriter
+    /// 防抖写回（原子写 tmp+Move + 占用重试）；FlushConfigAsync 冲刷、Shutdown 排空；
+    /// null（默认）= 纯内存（原行为）。
+    /// </summary>
+    public string? ConfigFilePath { get; set; }
+
     /// <summary>是否启用能力域（01 §2 管理层职责；默认开启，纯生命周期宿主可关闭）。</summary>
     public bool EnableCapabilityDomain { get; set; } = true;
 
