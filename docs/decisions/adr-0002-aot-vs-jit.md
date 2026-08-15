@@ -93,12 +93,8 @@ Cordis C# 版的核心卖点是**插件热重载**：插件 = 单文件 `.cs`，
 
 - 项目保持标准 `dotnet` 项目配置（非 PublishAot）。
 - `docs/architecture/02-plugin-model.md` §4 的 Roslyn 内存编译路线不受影响，按原设计实现。
-<<<<<<< HEAD
 - **AOT 就绪约束**：虽然当前不采用 NativeAOT，本项目所有代码必须按 AOT 兼容标准编写（AGENTS.md 规则 0）——禁止运行时反射/动态生成/反射序列化于宿主路径，保证未来切换 AOT 零改动。
-- 未来若要 AOT：单独评估方案 B，不改变核心插件模型。
-=======
 - 未来若要 AOT：单独评估方案 B（经 `IPluginHost`），不改变核心插件模型。
->>>>>>> wt/t_07b173f0
 
 ## 关联
 
