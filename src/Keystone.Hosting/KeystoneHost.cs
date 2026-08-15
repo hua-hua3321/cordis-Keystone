@@ -48,13 +48,31 @@ public sealed class KeystoneHost : IAsyncDisposable
     // ── 启动 / 关闭 ──
 
     /// <summary>8 步启动（09 §2）：解析条目 → schema 校验 → manifest 校验 → 根 context → 并行加载（门控拓扑）→ 就绪。</summary>
-    public async Task StartAsync(string configYaml)
+    public Task StartAsync(string configYaml)
     {
         ArgumentNullException.ThrowIfNull(configYaml);
+        return StartAsync([configYaml]);
+    }
 
-        // 1. 配置层：条目解析（含重复 id fail-fast；DC-8：!!env/!!file tag 静态插值，ADR-0012）
+    /// <summary>
+    /// 分层启动（DC-7，08 §4）：多 YAML 层按序叠加（base → profile → 用户 patch → 运行期 overlay）——
+    /// patch 按 id 合并（提供的字段覆盖、未提供保留）、显式 insert 插入、层内重复 id fail-fast；
+    /// 每层独立解析（含 DC-8 静态插值），叠加以条目 id 为主键（EntryTree.ApplyLayers）。
+    /// </summary>
+    public async Task StartAsync(IReadOnlyList<string> layerYamls)
+    {
+        ArgumentNullException.ThrowIfNull(layerYamls);
+        if (layerYamls.Count == 0)
+        {
+            throw new KeystoneException(ErrorCode.ConfigValidationFailed, "at least one config layer is required");
+        }
+
+        // 1. 配置层：逐层解析（DC-8 插值按层展开）→ 分层叠加（08 §4）
         var interpolator = BuildInterpolator();
-        var entries = EntryParser.Parse(configYaml, interpolator);
+        var layers = layerYamls
+            .Select(layer => EntryParser.Parse(layer, interpolator))
+            .ToList();
+        var entries = EntryTree.ApplyLayers(layers);
         _tree.Clear();
         _tree.AddRange(entries);
 

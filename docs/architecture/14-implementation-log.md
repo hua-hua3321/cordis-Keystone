@@ -68,6 +68,7 @@ created: 2026-08-15
 | P38 文档达标 DC-8 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 静态插值接线（§7.38：!!env/!!file tag 语法 + 环检测 + 宿主提供者注入，258/258 全绿） | §7.38 |
 | P39 文档达标 DC-11 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 事实事件接入运行链（§7.39：IFactEvent + 任务/生命周期事实 + 宿主 EventStore，266/266 全绿） | §7.39 |
 | P40 文档达标 DC-10 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 管道 swap 原子替换（§7.40：实例化缓存 + SwapPipelineAsync + 保留 actor/context，269/269 全绿） | §7.40 |
+| P41 文档达标 DC-7 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 宿主分层叠加（§7.41：StartAsync 多层按序叠加 + 逐层插值，274/274 全绿）——P1 四项闭合 | §7.41 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -147,6 +148,7 @@ created: 2026-08-15
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 | ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
 | ID-33 | 2026-08-16 | P38 | 静态插值双层形态（DC-8，ADR-0012）：YAML 整值标量走 tag 形态（!!env NAME/!!file path，YamlDotNet TagName）；文本内容内引用走冒号前缀形态（!!env:NAME）；缺失保留标记（tag 形态重构为 `!!env NAME` 字符串，不静默替换）；环检测 visited 改展开栈语义（add→递归→remove，同文件多处引用非环） | ADR-0012 tag 机制保留（YamlDotNet 自定义 tag）；字符串中间嵌入标记不支持（ADR 示例均为整值）；原实现 visited 只增不减（误报环） | `src/Keystone.Config/Interpolation/StaticInterpolator.cs`、`Entries/EntryParser.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-8） |
+| ID-36 | 2026-08-16 | P41 | 宿主分层叠加形态（DC-7，08 §4）：`StartAsync(IReadOnlyList<string>)` 多层重载——逐层独立解析（DC-8 插值按层展开）→ EntryTree.ApplyLayers 叠加（patch 按 id 合并/insert 插入/层内重复 fail-fast）；`StartAsync(string)` 转发单层（原语义零破坏）；空层列表 = ConfigValidationFailed | 08 §4 叠加以条目 id 为主键；patch 语义 = 替换整个 config（08 §4 原文"替换整个 config"）非逐 key 合并；环境选择 = 调用方选层（overlay 由嵌入方组装，框架不内置环境探测） | `src/Keystone.Hosting/KeystoneHost.cs` | 否（17-doc-compliance-audit DC-7） |
 | ID-35 | 2026-08-16 | P40 | 管道缓存 + swap 形态（DC-10，ADR-0003 决策 2）：CapabilityActor 构造时构建管道缓存（跨请求复用，无中间件=直通管道）；terminal 经 actor 级当前请求槽路由 handler（链缓存不绑定特定请求；actor 串行循环内无竞争）；SwapPipeline 消息 → 新链构建后 volatile 换引用（原子替换）；保留 actor/context，在途请求已捕获旧链（串行无半新半旧交错） | 04 §8"管道配置热更新=原子替换"；原实现每请求重建（terminal 捕获 envelope 所致）→ 槽路由解耦请求与链；CapabilityDomain.SwapPipelineAsync 公开面（Send 单向消息，无需响应） | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`SwapPipeline.cs`、`CapabilityDomain.cs` | 否（17-doc-compliance-audit DC-10） |
 | ID-34 | 2026-08-16 | P39 | 事实事件接线形态（DC-11，ADR-0009）：`IFactEvent` 标记接口（TaskId/Capability/Payload/Durable）+ EventBus 构造注入 `IEventStore`——emit 分发**先记录后分发**（观察者异常不丢事实）；durable=true 写失败传播、false 尽力写降级（ADR-0009 决策 3）；事实流：能力域 actor 任务完成/失败（Capability=实例名）+ PluginRuntime 生命周期（经 context 总线，无 context 阶段用外部总线参数）；宿主 EventStore 选项挂根总线（子链共享） | 03 §4 事实事件=emit 分发模式（拦截/策略事件不持久）；先记录后分发保证观察者异常不丢事实；内置事实全 Durable=false（持久化失败不改变主链语义——任务结果已定，不因旁路写失败翻转） | `src/Keystone.Runtime/Events/IFactEvent.cs`、`Facts*.cs`、`EventBus.cs`、`Actors/CapabilityActor.cs`、`Plugins/Lifecycle/PluginRuntime.cs`、`Context/ContextFacade.cs`、`Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-11） |
 
@@ -665,6 +667,15 @@ created: 2026-08-15
 | 2026-08-16 | W40-02 | SwapPipeline 消息（actor 串行循环内换 volatile 引用）+ `CapabilityDomain.SwapPipelineAsync`（Send 单向）；保留 actor/context（状态不丢），在途走旧链 | 实现（TDD） | DC-10；04 §8；ID-35 | `src/Keystone.Runtime/Actors/SwapPipeline.cs`、`CapabilityDomain.cs` | `Swap_replaces_middleware_chain_atomically` + `Swap_preserves_instance_context_state` | ✅ |
 | 2026-08-16 | W40-03 | 全量回归 269/269 + Runtime AOT 发布零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.41 P41 文档达标 DC-7：宿主分层叠加
+
+> 17-doc-compliance-audit DC-7（❌→✅）：EntryTree.ApplyLayers 孤立、宿主只吃单 YAML。本次接通多层层叠（08 §4 base → profile → patch → overlay）——P1 四项闭合。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-16 | W41-01 | `StartAsync(IReadOnlyList<string>)` 多层重载：逐层解析（含 DC-8 插值）→ EntryTree.ApplyLayers 叠加 → 既有启动管线（manifest 校验/门控加载）；`StartAsync(string)` 转发单层（兼容） | 实现（TDD） | DC-7；08 §4；ID-36 | `src/Keystone.Hosting/KeystoneHost.cs` | `LayeredConfigTests`（5） | ✅ |
+| 2026-08-16 | W41-02 | 全量回归 274/274 + Hosting AOT 发布零 IL 警告（MSBuild Server 残留态导致的 MSB3491 经 build-server shutdown + 清 obj 排除，非代码问题） | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -770,6 +781,8 @@ created: 2026-08-15
 | ID-34 | ADR-0009；DC-11 | `Runtime/Events/`、`Actors/`、`Plugins/Lifecycle/`、`Context/`、`Hosting/` | W39-01~05 |
 | W40-01~02 | ID-35 | `Actors/CapabilityActor.cs`、`SwapPipeline.cs`、`CapabilityDomain.cs` | `PipelineSwapTests`（3） |
 | ID-35 | ADR-0003 决策 2；DC-10 | `Actors/`（管道缓存 + swap） | W40-01~03 |
+| W41-01 | ID-36 | `Hosting/KeystoneHost.cs` | `LayeredConfigTests`（5） |
+| ID-36 | 08 §4；DC-7 | `Hosting/`（分层叠加） | W41-01~02 |
 
 ## 9. 维护规则
 
