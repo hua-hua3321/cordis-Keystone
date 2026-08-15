@@ -1,4 +1,5 @@
 using Keystone.Config.Entries;
+using Keystone.Config.Validation;
 using Keystone.Core.Errors;
 using Keystone.Runtime.Actors;
 using Keystone.Runtime.Context;
@@ -20,6 +21,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     private readonly List<HostedPlugin> _plugins = [];
     private readonly List<EntryOptions> _tree = [];
     private readonly List<Func<PatchContextEventArgs, Func<Task>, Task>> _patchContextHandlers = [];
+    private readonly HashSet<string> _failedEntries = new(StringComparer.Ordinal);
     private ContextFacade? _rootContext;
     private CapabilityDomain? _capabilityDomain;
     private bool _shutdown;
@@ -90,6 +92,7 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         _plugins.Clear();
         _tree.Clear();
+        _failedEntries.Clear();
 
         if (_capabilityDomain is not null)
         {
@@ -205,6 +208,11 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// <summary>插件状态查询（PENDING/ACTIVE/FAILED...）。</summary>
     public PluginLifecycleState GetPluginState(string entryId)
     {
+        if (_failedEntries.Contains(entryId))
+        {
+            return PluginLifecycleState.Failed; // G-C1：配置校验失败 → FAILED（隔离语义）
+        }
+
         var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, entryId, StringComparison.Ordinal))
             ?? throw new KeystoneException(ErrorCode.GatingServiceNotFound, $"plugin not loaded: {entryId}");
         return hosted.Loader.Runtime.State;
@@ -262,10 +270,48 @@ public sealed class KeystoneHost : IAsyncDisposable
     {
         var manifest = _options.ManifestProvider(entry);
         var source = _options.SourceProvider(entry);
+
+        // G-C1 配置注入（16-cordis-gap-review）：schema 校验 + 默认值补齐后传入插件。
+        // 校验失败 → 该插件 FAILED（09 §2 隔离语义：插件失败不整域回滚），不阻断其他插件。
+        IReadOnlyDictionary<string, object?>? config;
+        try
+        {
+            config = await ResolvePluginConfigAsync(entry).ConfigureAwait(false);
+        }
+        catch (Keystone.Core.Errors.KeystoneException ex) when (string.Equals(ex.Code, Keystone.Core.Errors.ErrorCode.ConfigValidationFailed, StringComparison.Ordinal))
+        {
+            _failedEntries.Add(entry.Id!);
+            EntryInit?.Invoke(this, new EntryInitEventArgs(entry));
+            return;
+        }
+
         var loader = await PluginLoader.CreateAsync(
-            source, manifest, _registry, id => new ContextFacade(id, _rootContext)).ConfigureAwait(false);
+            source, manifest, _registry, id => new ContextFacade(id, _rootContext), config).ConfigureAwait(false);
         _plugins.Add(new HostedPlugin(entry.Id!, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(entry)); // 统一加载入口（F9）
+    }
+
+    /// <summary>G-C1：条目 config → 插件 config（无 schema 声明则原始直传；有则校验+默认值）。</summary>
+    private async Task<IReadOnlyDictionary<string, object?>?> ResolvePluginConfigAsync(EntryOptions entry)
+    {
+        if (entry.Config is null)
+        {
+            return null;
+        }
+
+        var schema = _options.ConfigSchemaProvider(entry);
+        if (schema is null)
+        {
+            return entry.Config as IReadOnlyDictionary<string, object?>
+                ?? new Dictionary<string, object?>(StringComparer.Ordinal) { ["value"] = entry.Config };
+        }
+
+        var resolver = new ConfigResolver();
+        var resolved = await resolver
+            .ResolveAsync(entry.Config, schema, _options.ConfigFilters, CancellationToken.None)
+            .ConfigureAwait(false);
+        return resolved as IReadOnlyDictionary<string, object?>
+            ?? new Dictionary<string, object?>(StringComparer.Ordinal) { ["value"] = resolved };
     }
 
     private static IEnumerable<EntryOptions> EnumerateLeaves(IEnumerable<EntryOptions> entries)

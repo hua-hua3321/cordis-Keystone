@@ -18,6 +18,7 @@ public sealed class PluginRuntime : IAsyncDisposable
     private readonly Func<IPluginContext, IPlugin> _pluginFactory;
     private readonly IServiceRegistry _registry;
     private readonly Func<string, IPluginContext> _contextFactory;
+    private readonly IReadOnlyDictionary<string, object?> _config;
     private readonly TimeSpan _quiesceTimeout;
     private readonly Lock _lock = new();
 
@@ -33,6 +34,7 @@ public sealed class PluginRuntime : IAsyncDisposable
         Func<IPluginContext, IPlugin> pluginFactory,
         IServiceRegistry registry,
         Func<string, IPluginContext> contextFactory,
+        IReadOnlyDictionary<string, object?>? config = null,
         TimeSpan? quiesceTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(manifest);
@@ -44,6 +46,7 @@ public sealed class PluginRuntime : IAsyncDisposable
         _pluginFactory = pluginFactory;
         _registry = registry;
         _contextFactory = contextFactory;
+        _config = config ?? new Dictionary<string, object?>(StringComparer.Ordinal);
         _quiesceTimeout = quiesceTimeout ?? new KeystoneSettings().QuiesceTimeout;
 
         // 依赖消失 → 依赖方走完整卸载闸门（ADR-0007 决策 3）
@@ -200,7 +203,7 @@ public sealed class PluginRuntime : IAsyncDisposable
                 plugin = _plugin;
             }
 
-            await plugin.InitializeAsync(context, new Dictionary<string, object?>(StringComparer.Ordinal)).ConfigureAwait(false);
+            await plugin.InitializeAsync(context, _config).ConfigureAwait(false);
             foreach (var service in _manifest.Provides)
             {
                 _registry.Register(service, _manifest.Id);

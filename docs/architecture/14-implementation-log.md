@@ -51,6 +51,7 @@ created: 2026-08-15
 | P21 集成验收 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 端到端集成测试（§7.21：真实插件组全链跑通 + B5 跨插件服务解析修复，207/207 全绿） | §7.21 |
 | P22 接入 B3/B4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 管道接入能力域 + 宿主事件面（§7.22：actor 持管道兑现 + Events 公开，209/209 全绿） | §7.22 |
 | P23 Cordis 差距复核 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 实现后差距复核（§7.23：G-C1~C14 清单 + 16-cordis-gap-review 文档） | §7.23 |
+| P24 差距 G-C1 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 插件配置注入（§7.24：EntryOptions.Config → schema 校验 → 默认值 → InitializeAsync，212/212 全绿） | §7.24 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -116,6 +117,7 @@ created: 2026-08-15
 | ID-17 | 2026-08-15 | P19 | AI 组合层边界（15-plan D4）：①移除 `Microsoft.Agents.AI.Workflows` 死依赖（WorkflowBridge 纯 Task，MAF 图构建未接线前不引）；②`SkillRegistry` 返回 MAF 类型保持（唯一消费方=AI 层内部，组合层预期） | 死依赖违反单向组合克制；C4 按"仅组合层内部消费→保持"标准（与 Mcp 桥不同：Mcp 是框架通用能力需隔离，skills 是 AI 专属） | `Keystone.AI.csproj`、`Directory.Packages.props` | 否（15-plan D4） |
 | ID-18 | 2026-08-15 | P21 | 跨插件服务解析修复（集成验收 W21-02）：ContextFacade.Provide 有父时写公共祖先（root）——03 §2.1 组合语义（子不覆盖父、首次注册公共区）；Get/TryGet 沿父链向上（自己 → 父 → 根） | 集成测试暴露 DEV-02（03 §2"先自己再父"未实现）；兄弟插件共享 root 经父链可达；隔离实例（独立 root）天然隔离（03 §2.2 不变） | `src/Keystone.Runtime/Context/ContextFacade.cs` | 否（14 §5 DEV-02） |
 | ID-19 | 2026-08-15 | P22 | 能力域管道接入（B3）：CapabilityActor 内建中间件管道——handler 作 terminal，插件中间件（IMiddleware）before/after 包裹（01 §2"actor 持管道"兑现）；短路 = KS:PIPELINE:MIDDLEWARE_REJECTED 失败结果（非抛异常） | 01 §2 架构承诺；04 §2 形状 A 公开面；waterfall 否决语义（ADR-0006）；请求级独立 ContextFacade（实例隔离） | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | 否（01/04 文档备注） |
+| ID-20 | 2026-08-15 | P24 | 插件配置注入（G-C1）：Host 经 `ConfigSchemaProvider`（条目→schema）+ `ConfigResolver`（校验+默认值）解析 entry.Config 传入 `InitializeAsync`；无 schema 直传；校验失败 = 该插件 FAILED（09 §2 隔离，不整域回滚） | 兑现 Cordis resolveConfig（fiber.ts:641）+ 10-plugin-sdk §2"apply 收完整配置"；ConfigSchema/Resolver 从零调用接入宿主 | `KeystoneHostOptions`、`KeystoneHost`、`PluginLoader`、`PluginRuntime` | 否（16-cordis-gap-review G-C1 备注） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -459,6 +461,17 @@ created: 2026-08-15
 | 2026-08-15 | W23-02 | 主代理独立验证关键点：config 注入缺口（G-C1，ConfigResolver 零调用）/依赖 re-arm（G-C2）/服务值注销（G-C3）/M4 延迟注入（G-C5）/事件 false 语义（G-C4） | 审计 | 07/12 | — | 逐点代码证据 | ✅ |
 | 2026-08-15 | W23-03 | 差距文档 `16-cordis-gap-review.md`：3 高 + 5 中 + 6 低（G-C1~C14）+ 根因 + 建议计划 | 文档 | — | `docs/architecture/16-cordis-gap-review.md` | frontmatter 校验 + AGENTS 索引 | ✅ |
 
+### 7.24 P24 差距 G-C1：插件配置注入
+
+> 16-cordis-gap-review G-C1（🔴 高危）：插件 InitializeAsync 原收空字典，`EntryOptions.Config` 未传递、ConfigSchema/ConfigResolver 零调用。本次接线：schema 校验 + 默认值补齐 + 失败隔离。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W24-01 | KeystoneHostOptions 增 `ConfigSchemaProvider`（条目→schema，null=无 schema 直传）+ `ConfigFilters`（M3 过滤器链） | 实现（TDD） | G-C1；08 §5 | `src/Keystone.Hosting/KeystoneHostOptions.cs` | 构建绿 | ✅ |
+| 2026-08-15 | W24-02 | PluginRuntime/PluginLoader 构造增 config 参数（默认空字典兼容）；LoadSourceAsync 传递 | 实现（TDD） | G-C1 | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs`、`Loading/PluginLoader.cs` | 现有测试全绿 | ✅ |
+| 2026-08-15 | W24-03 | KeystoneHost.ResolvePluginConfigAsync：entry.Config → ConfigResolver（校验+默认值）；校验失败 → 该插件 FAILED（09 §2 隔离语义，_failedEntries 记录）不阻断其他 | 实现（TDD） | G-C1；09 §2 | `src/Keystone.Hosting/KeystoneHost.cs` | 3 用例绿（默认值/失败隔离/无 schema 直传） | ✅ |
+| 2026-08-15 | W24-04 | 全量回归 212/212 + Hosting/Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` × 2 | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -529,6 +542,8 @@ created: 2026-08-15
 | W22-04 | 01 §2 | `tests/Keystone.Hosting.Tests/EndToEndIntegrationTests.cs` | 集成用例绿 |
 | ID-19 | 01 §2；04 §2 | `Actors/`（管道） | W22-01~05 |
 | W23-01~03 | 07/12 | `16-cordis-gap-review.md`（G-C1~C14） | 审计闭环 |
+| W24-01~03 | ID-20 | `KeystoneHostOptions`、`KeystoneHost`、`PluginLoader`、`PluginRuntime` | 3 用例绿 |
+| ID-20 | G-C1 | `Hosting/`、`Runtime/Plugins/`（config 注入） | W24-01~04 |
 
 ## 9. 维护规则
 

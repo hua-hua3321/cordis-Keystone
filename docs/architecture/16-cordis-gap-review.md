@@ -16,7 +16,7 @@ created: 2026-08-15
 
 | # | 差距 | Cordis 依据 | Keystone 现状 | 影响 |
 |---|------|-----------|--------------|------|
-| G-C1 | **插件配置注入缺失** | Fiber 启动前 `resolveConfig`（fiber.ts:641-645）；Config schema 校验 + 默认值补齐 | `PluginRuntime` 调 `InitializeAsync(ctx, new Dictionary<string,object?>())`——**空字典**；`EntryOptions.Config` 从未传递（KeystoneHost.cs:258-261）；`ConfigSchema`/`ConfigResolver`（M3 管线）**零外部调用**，孤立在配置层 | 插件拿不到配置，配置驱动架构（01 §5）核心承诺未兑现；ConfigResolver 是"功能独立未接通" |
+| G-C1 | **插件配置注入缺失** | Fiber 启动前 `resolveConfig`（fiber.ts:641-645）；Config schema 校验 + 默认值补齐 | ~~`PluginRuntime` 调 `InitializeAsync(ctx, new Dictionary<string,object?>())`——空字典；`EntryOptions.Config` 从未传递~~ **✅ 已闭合（P24）**：Host 经 ConfigSchemaProvider + ConfigResolver 校验/补齐后传入；无 schema 直传；校验失败 = 插件 FAILED（隔离语义） | 配置驱动架构核心承诺兑现 |
 | G-C2 | **依赖恢复 re-arm 缺失** | 依赖消失 → 依赖方卸载；依赖重现 → 自动重启（fiber.ts:625-639 epoch 驱动） | 依赖消失 → `StopCoreAsync()` → DISPOSED（PluginRuntime.cs:50-57）；**无重现订阅**；`RestartAsync` 只接受 Active/Failed，DISPOSED 无法恢复 | 服务提供方重载/恢复后，依赖方永久停摆——热更新链断裂（ADR-0007 决策 3 只实现一半） |
 | G-C3 | **服务值卸载注销缺失** | provide 返回 disposer，fiber 卸载自动注销 + 唤醒依赖（reflect.ts） | `ContextFacade.Provide` 写 root store **无 Remove**；插件卸载只摘 manifest 声明名（ServiceRegistry.Unregister），运行期 Provide 的服务值滞留 | 依赖方 Get 得**陈旧服务**而非重评——卸载语义不完整（P21 补的父链解析放大此问题） |
 
@@ -61,7 +61,7 @@ created: 2026-08-15
 
 | 优先级 | 差距 | 建议方案 | 工作量 |
 |--------|------|---------|--------|
-| P0 | G-C1 配置注入 | `KeystoneHost` 把 `entry.Config` 经 ConfigResolver（schema 校验 + 默认值）传入 `PluginLoader` → `InitializeAsync`；`KeystoneHostOptions` 增 ConfigSchemaProvider | 中 |
+| P0 | G-C1 配置注入 | ✅ 已执行（P24，14 §7.24/ID-20）：`KeystoneHostOptions.ConfigSchemaProvider` + `ConfigResolver` 校验/默认值 → `InitializeAsync`；无 schema 直传；校验失败 = 插件 FAILED（隔离） | 中 |
 | P0 | G-C2 依赖 re-arm | `PluginRuntime` 订阅依赖重现事件 → 从 DISPOSED/UNLOADING 恢复 StartAsync（状态机补恢复路径）；`RestartAsync` 接受更多状态 | 中 |
 | P0 | G-C3 服务值注销 | `IServiceStore.Remove` + 插件卸载时注销运行期 Provide 的值 + 依赖方重评 | 小 |
 | P1 | G-C5 M4 延迟注入 | `IPluginContext.GetLazy<T>` / `Task<T>` 延迟解析（Lazy 语义） | 中 |

@@ -16,16 +16,22 @@ public sealed class PluginLoader : IAsyncDisposable
     private readonly PluginManifest _manifest;
     private readonly IServiceRegistry _registry;
     private readonly Func<string, IPluginContext> _contextFactory;
+    private readonly IReadOnlyDictionary<string, object?> _config;
 
     private PluginAssemblyLoadContext _alc = null!;
     private PluginRuntime? _runtime;
     private WeakReference? _unloadedAlc;
 
-    private PluginLoader(PluginManifest manifest, IServiceRegistry registry, Func<string, IPluginContext> contextFactory)
+    private PluginLoader(
+        PluginManifest manifest,
+        IServiceRegistry registry,
+        Func<string, IPluginContext> contextFactory,
+        IReadOnlyDictionary<string, object?>? config = null)
     {
         _manifest = manifest;
         _registry = registry;
         _contextFactory = contextFactory;
+        _config = config ?? new Dictionary<string, object?>(StringComparer.Ordinal);
     }
 
     /// <summary>当前插件运行时（ACTIVE 后可用）。</summary>
@@ -39,14 +45,15 @@ public sealed class PluginLoader : IAsyncDisposable
         PluginSource source,
         PluginManifest manifest,
         IServiceRegistry registry,
-        Func<string, IPluginContext> contextFactory)
+        Func<string, IPluginContext> contextFactory,
+        IReadOnlyDictionary<string, object?>? config = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(contextFactory);
 
-        var loader = new PluginLoader(manifest, registry, contextFactory);
+        var loader = new PluginLoader(manifest, registry, contextFactory, config);
         await loader.LoadSourceAsync(source).ConfigureAwait(false);
         return loader;
     }
@@ -119,7 +126,7 @@ public sealed class PluginLoader : IAsyncDisposable
             ?? throw new KeystoneException(ErrorCode.LifecycleLoadFailed, $"plugin '{source.Id}' could not be instantiated");
 
         _alc = alc;
-        _runtime = new PluginRuntime(_manifest, _ => plugin, _registry, _contextFactory);
+        _runtime = new PluginRuntime(_manifest, _ => plugin, _registry, _contextFactory, _config);
         await _runtime.StartAsync().ConfigureAwait(false);
     }
 }
