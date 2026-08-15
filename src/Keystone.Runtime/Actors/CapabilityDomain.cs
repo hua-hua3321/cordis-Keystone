@@ -1,4 +1,5 @@
 using Keystone.Core.Contracts;
+using Keystone.Runtime.Pipeline;
 using Proto;
 
 namespace Keystone.Runtime.Actors;
@@ -43,13 +44,20 @@ public sealed class CapabilityDomain : IAsyncDisposable
         return new CapabilityDomain(system, name, ownsSystem: false);
     }
 
-    /// <summary>Spawn 一个能力域实例（instanceName 唯一；handler 处理跨域请求）。</summary>
-    public CapabilityHandle Spawn(string instanceName, Func<TaskEnvelope, Task<TaskResultEnvelope>> handler)
+    /// <summary>
+    /// Spawn 一个能力域实例（instanceName 唯一；handler 处理跨域请求）。
+    /// <paramref name="middlewares"/> = 插件中间件链（01 §2：actor 持管道，中间件包裹 handler，
+    /// before/after/短路语义，ADR-0006 waterfall）。
+    /// </summary>
+    public CapabilityHandle Spawn(
+        string instanceName,
+        Func<TaskEnvelope, Task<TaskResultEnvelope>> handler,
+        IReadOnlyList<IMiddleware>? middlewares = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
         ArgumentNullException.ThrowIfNull(handler);
 
-        var props = Props.FromProducer(() => new CapabilityActor(handler));
+        var props = Props.FromProducer(() => new CapabilityActor(instanceName, handler, middlewares));
         var pid = _system.Root.SpawnNamed(props, $"{_name}-{instanceName}");
         return new CapabilityHandle(this, pid);
     }

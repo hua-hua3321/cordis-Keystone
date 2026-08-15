@@ -91,9 +91,24 @@ public static class IntegrationSources
         """;
 }
 
-/// <summary>端到端集成测试（P21）：真实功能全链——配置 → 宿主 → Roslyn 加载 → 门控 → 服务注入 → 能力域跨域调用 → 事件观察 → 优雅关闭。</summary>
+/// <summary>端到端集成测试（P21-P22）：真实功能全链——配置 → 宿主 → Roslyn 加载 → 门控 → 服务注入 → 能力域跨域调用（中间件管道）→ 事件观察 → 优雅关闭。</summary>
 public class EndToEndIntegrationTests
 {
+    /// <summary>请求审计中间件（P22/B3：插件中间件链 before/after 记录）。</summary>
+    private sealed class RecordingMiddleware(string id, int order, List<string> trace) : Keystone.Runtime.Pipeline.IMiddleware
+    {
+        public string Id => id;
+
+        public int Order => order;
+
+        public async Task InvokeAsync(Keystone.Runtime.Context.IPluginContext ctx, Keystone.Runtime.Pipeline.RequestDelegate next)
+        {
+            trace.Add($"{id}:before");
+            await next(ctx);
+            trace.Add($"{id}:after");
+        }
+    }
+
     private static KeystoneHostOptions Options() => new()
     {
         ManifestProvider = e => e.Id switch
@@ -143,24 +158,31 @@ public class EndToEndIntegrationTests
         var domain = host.GetCapabilityDomain();
         Assert.NotNull(domain);
         var computedResults = new System.Collections.Concurrent.ConcurrentDictionary<string, double>();
-        var handle = domain.Spawn("calculator-inst", envelope =>
-        {
-            var op = envelope.Operation;
-            var (a, b) = Parse(envelope.PayloadBytes ?? []);
-            var result = op switch
+        var middlewareTrace = new List<string>();
+        var handle = domain.Spawn("calculator-inst",
+            envelope =>
             {
-                "add" => a + b,
-                "mul" => a * b,
-                _ => throw new InvalidOperationException($"unknown operation: {op}"),
-            };
-            computedResults[envelope.TaskId.ToString()] = result;
-            return Task.FromResult(new Keystone.Core.Contracts.TaskResultEnvelope
-            {
-                TaskId = envelope.TaskId,
-                Succeeded = true,
-                Type = Keystone.Core.Contracts.TaskResultType.Completed,
-            });
-        });
+                var op = envelope.Operation;
+                var (a, b) = Parse(envelope.PayloadBytes ?? []);
+                var result = op switch
+                {
+                    "add" => a + b,
+                    "mul" => a * b,
+                    _ => throw new InvalidOperationException($"unknown operation: {op}"),
+                };
+                computedResults[envelope.TaskId.ToString()] = result;
+                return Task.FromResult(new Keystone.Core.Contracts.TaskResultEnvelope
+                {
+                    TaskId = envelope.TaskId,
+                    Succeeded = true,
+                    Type = Keystone.Core.Contracts.TaskResultType.Completed,
+                });
+            },
+            // P22（B3）：插件中间件链（01 §2 actor 持管道）——请求审计中间件 before/after 包裹 handler
+            [
+                new RecordingMiddleware("req-audit", 1, middlewareTrace),
+                new RecordingMiddleware("req-metrics", 2, middlewareTrace),
+            ]);
 
         var taskId = Guid.NewGuid();
         var result = await domain.RequestAsync(handle, new Keystone.Core.Contracts.TaskEnvelope
@@ -174,21 +196,20 @@ public class EndToEndIntegrationTests
         Assert.True(result.Succeeded);
         Assert.Equal(taskId, result.TaskId); // TaskId 跨域贯穿（O2 前置）
         Assert.Equal(42.0, computedResults[taskId.ToString()]); // 真实计算结果
+        // 管道执行顺序（01 §2 actor 持管道）：中间件 before → handler → 中间件 after
+        Assert.Equal(["req-audit:before", "req-metrics:before", "req-metrics:after", "req-audit:after"], middlewareTrace);
 
-        // 5. 事件观察：audit 插件已 Subscribe(TaskCompleted)——经共享事件总线（ID-08）发射，
-        //    audit 收到事件（观察者不干预主链）。总线经 root context 访问（宿主未公开事件面——B4 集成发现，测试基建反射）
+        // 5. 事件观察：audit 插件已 Subscribe(TaskCompleted)——经宿主公开事件面（B4 已补）发射，
+        //    audit 收到事件（观察者不干预主链）。事件类型在插件 ALC——反射调用泛型 EmitAsync
         var before = ReadStaticInt("AuditPlugin", "ObservedEvents");
-        // AuditPlugin 类型在插件 ALC 内——经已加载程序集解析事件类型
         var eventType = FindType("AuditPlugin+TaskCompleted") ?? throw new InvalidOperationException("AuditPlugin.TaskCompleted not found");
         var evt = Activator.CreateInstance(eventType, "calculator", "add")!;
-        // 纯总线发射（无 publisher）：G15 无上下文语义放行，audit 订阅收到（观察者不干预主链）
-        // 注：evt 运行时类型在插件 ALC——用反射调用泛型 EmitAsync<TEvent>（编译期推断会退化为 object）
-        var events = GetRootContext(host).Events;
-        var emitMethod = events.GetType()
+        var hostEvents = host.Events ?? throw new InvalidOperationException("host.Events 未公开");
+        var emitMethod = hostEvents.GetType()
             .GetMethods()
             .First(m => m.Name == "EmitAsync" && m.IsGenericMethodDefinition)
             .MakeGenericMethod(eventType);
-        var emitTask = (Task)emitMethod.Invoke(events, [evt, null, CancellationToken.None])!;
+        var emitTask = (Task)emitMethod.Invoke(hostEvents, [evt, null, CancellationToken.None])!;
         await emitTask;
         var after = ReadStaticInt("AuditPlugin", "ObservedEvents");
         Assert.Equal(before + 1, after); // audit 收到事件
@@ -248,14 +269,5 @@ public class EndToEndIntegrationTests
         }
 
         return null;
-    }
-
-    // 宿主根 context（事件总线共享面，ID-08）：宿主未公开事件 API（B4 集成发现），测试基建反射取
-    private static Keystone.Runtime.Context.IContext GetRootContext(Keystone.Hosting.KeystoneHost host)
-    {
-        var field = typeof(Keystone.Hosting.KeystoneHost)
-            .GetField("_rootContext", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?? throw new InvalidOperationException("_rootContext not found");
-        return (Keystone.Runtime.Context.IContext)field.GetValue(host)!;
     }
 }

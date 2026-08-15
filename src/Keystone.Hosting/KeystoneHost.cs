@@ -20,7 +20,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     private readonly List<HostedPlugin> _plugins = [];
     private readonly List<EntryOptions> _tree = [];
     private readonly List<Func<PatchContextEventArgs, Func<Task>, Task>> _patchContextHandlers = [];
-    private IContext? _rootContext;
+    private ContextFacade? _rootContext;
     private CapabilityDomain? _capabilityDomain;
     private bool _shutdown;
 
@@ -100,6 +100,12 @@ public sealed class KeystoneHost : IAsyncDisposable
 
     /// <summary>能力域（01 §2 管理层职责）：跨域请求入口。StartAsync 后可用；未启用时为 null。</summary>
     public CapabilityDomain? GetCapabilityDomain() => _capabilityDomain;
+
+    /// <summary>
+    /// 宿主事件总线（P22，B4 公开事件面）：StartAsync 后可用（root context 共享总线，ID-08）。
+    /// 插件订阅经各自 context 注册到同一总线；宿主可经此发布全局事件（观察者插件收到）。
+    /// </summary>
+    public Keystone.Runtime.Events.IEventBus? Events => _rootContext?.Events;
 
     private void NotifyConfigUpdate()
         => ConfigUpdate?.Invoke(this, new ConfigUpdateEventArgs(DumpConfig()));

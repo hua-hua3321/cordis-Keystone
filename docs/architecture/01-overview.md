@@ -51,6 +51,8 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 
 **核心分层**：context 长命，插件短命。热重载 = 摘旧插件换新插件，actor 和 context 不动。
 
+> **实现备注（2026-08-15，P22，见 14-implementation-log §7.22 / ID-19）**："actor 持管道"已落地——`CapabilityActor` 内建中间件管道（`CapabilityDomain.Spawn` 接收 `IMiddleware[]`），插件中间件 before/after 包裹 handler（terminal）；短路 = `KS:PIPELINE:MIDDLEWARE_REJECTED` 失败结果（waterfall 否决，ADR-0006）。中间件在请求级独立 ContextFacade 上执行（实例隔离，03 §2.2）。
+
 ## 4. 多实例模型
 
 同一能力域可创建多个实例，各自独立执行不同任务：

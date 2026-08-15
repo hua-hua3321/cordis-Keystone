@@ -49,6 +49,7 @@ created: 2026-08-15
 | P19 解耦 D4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | AI 层边界 + Workflows 死依赖清理（§7.19：C8 闭合，C4 记录保持，206/206 全绿） | §7.19 |
 | P20 解耦 D5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 回归闭环（§7.20：206/206 + 六工程 AOT 零 IL 警告 + 15-plan 全部完成） | §7.20 |
 | P21 集成验收 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 端到端集成测试（§7.21：真实插件组全链跑通 + B5 跨插件服务解析修复，207/207 全绿） | §7.21 |
+| P22 接入 B3/B4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 管道接入能力域 + 宿主事件面（§7.22：actor 持管道兑现 + Events 公开，209/209 全绿） | §7.22 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -113,6 +114,7 @@ created: 2026-08-15
 | ID-16 | 2026-08-15 | P18 | 配置解析面收敛（15-plan D2）：`EntryParser.NodeToObject` 降 private，YamlDotNet 类型退出公共面 | 无外部调用（仅内部递归）；Parse(string) 返回纯框架类型足够；隔离测试锁定 | `src/Keystone.Config/Entries/EntryParser.cs` | 否（15-plan D2） |
 | ID-17 | 2026-08-15 | P19 | AI 组合层边界（15-plan D4）：①移除 `Microsoft.Agents.AI.Workflows` 死依赖（WorkflowBridge 纯 Task，MAF 图构建未接线前不引）；②`SkillRegistry` 返回 MAF 类型保持（唯一消费方=AI 层内部，组合层预期） | 死依赖违反单向组合克制；C4 按"仅组合层内部消费→保持"标准（与 Mcp 桥不同：Mcp 是框架通用能力需隔离，skills 是 AI 专属） | `Keystone.AI.csproj`、`Directory.Packages.props` | 否（15-plan D4） |
 | ID-18 | 2026-08-15 | P21 | 跨插件服务解析修复（集成验收 W21-02）：ContextFacade.Provide 有父时写公共祖先（root）——03 §2.1 组合语义（子不覆盖父、首次注册公共区）；Get/TryGet 沿父链向上（自己 → 父 → 根） | 集成测试暴露 DEV-02（03 §2"先自己再父"未实现）；兄弟插件共享 root 经父链可达；隔离实例（独立 root）天然隔离（03 §2.2 不变） | `src/Keystone.Runtime/Context/ContextFacade.cs` | 否（14 §5 DEV-02） |
+| ID-19 | 2026-08-15 | P22 | 能力域管道接入（B3）：CapabilityActor 内建中间件管道——handler 作 terminal，插件中间件（IMiddleware）before/after 包裹（01 §2"actor 持管道"兑现）；短路 = KS:PIPELINE:MIDDLEWARE_REJECTED 失败结果（非抛异常） | 01 §2 架构承诺；04 §2 形状 A 公开面；waterfall 否决语义（ADR-0006）；请求级独立 ContextFacade（实例隔离） | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | 否（01/04 文档备注） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -432,7 +434,19 @@ created: 2026-08-15
 | 2026-08-15 | W21-03 | 端到端集成测试：calculator（真实计算服务）/telemetry（inject 门控注入）/audit（事件观察）三插件，全链验证——配置 YAML → 宿主启动 → Roslyn 编译加载 → 依赖门控 → 服务注入 → 能力域跨域调用（20+22=42，TaskId 贯穿）→ 事件观察（audit 收到）→ 优雅关闭（幂等） | 测试（集成） | — | `tests/Keystone.Hosting.Tests/EndToEndIntegrationTests.cs` | 1 集成用例绿 | ✅ |
 | 2026-08-15 | W21-04 | 全量回归 207/207 + Keystone.Runtime AOT 发布零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
-> **B4 记录**：宿主未公开事件总线（测试经反射访问 root context）——事件面暴露待后续（宿主 API 完善阶段）。
+> **B4 记录**：宿主未公开事件总线（测试经反射访问 root context）——事件面暴露待后续（宿主 API 完善阶段）。**P22 已闭合**（见 §7.22 W22-03）。
+
+### 7.22 P22 接入 B3/B4：管道入能力域 + 宿主事件面
+
+> 用户"继续接入"：P21 遗留断点 B3（管道未接宿主/能力域，01 §2"actor 持管道"未兑现）与 B4（宿主未公开事件面）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W22-01 | CapabilityActor 管道化（B3）：actor 内建 PipelineBuilder——中间件链包裹 handler（terminal）；短路 = KS:PIPELINE:MIDDLEWARE_REJECTED 失败结果（waterfall 否决，ADR-0006）；请求级 ContextFacade 供中间件取服务/日志 | 实现（TDD） | 01 §2；04 §2/§4；ADR-0006 | `src/Keystone.Runtime/Actors/CapabilityActor.cs` | `CapabilityDomainPipelineTests`（2） | ✅ |
+| 2026-08-15 | W22-02 | `CapabilityDomain.Spawn` 增 `IReadOnlyList<IMiddleware>` 参数（插件中间件链，01 §2 兑现） | 实现（TDD） | 01 §2 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs` | 管道测试绿 | ✅ |
+| 2026-08-15 | W22-03 | B4 宿主事件面：`KeystoneHost.Events`（root context 共享总线，StartAsync 后可用） | 实现 | ID-08；09 §5 | `src/Keystone.Hosting/KeystoneHost.cs` | 端到端测试用 host.Events（无反射） | ✅ |
+| 2026-08-15 | W22-04 | 端到端升级：能力域调用经中间件管道（req-audit/req-metrics before/after 顺序断言）+ 事件经 host.Events | 测试（集成） | 01 §2；ID-08 | `tests/Keystone.Hosting.Tests/EndToEndIntegrationTests.cs` | 1 集成用例绿（管道 + 事件） | ✅ |
+| 2026-08-15 | W22-05 | 全量回归 209/209 + Runtime/Hosting AOT 发布零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` × 2 | ✅ |
 
 ## 8. 回溯索引（三向映射）
 
@@ -498,6 +512,11 @@ created: 2026-08-15
 | W21-02 | ID-18 | `Context/ContextFacade.cs` | 89 Runtime 测试 + 集成验证 |
 | W21-03 | — | `tests/Keystone.Hosting.Tests/EndToEndIntegrationTests.cs` | 1 集成用例绿 |
 | ID-18 | 03 §2；DEV-02 | `Context/ContextFacade.cs` | W21-02 |
+| W22-01 | ID-19 | `Actors/CapabilityActor.cs` | `CapabilityDomainPipelineTests`（2） |
+| W22-02 | ID-19 | `Actors/CapabilityDomain.cs` | 管道测试绿 |
+| W22-03 | ID-08 | `Keystone.Hosting/KeystoneHost.cs` | 端到端 host.Events |
+| W22-04 | 01 §2 | `tests/Keystone.Hosting.Tests/EndToEndIntegrationTests.cs` | 集成用例绿 |
+| ID-19 | 01 §2；04 §2 | `Actors/`（管道） | W22-01~05 |
 
 ## 9. 维护规则
 
