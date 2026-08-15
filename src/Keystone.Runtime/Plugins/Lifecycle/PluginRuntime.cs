@@ -49,12 +49,23 @@ public sealed class PluginRuntime : IAsyncDisposable
         _config = config ?? new Dictionary<string, object?>(StringComparer.Ordinal);
         _quiesceTimeout = quiesceTimeout ?? new KeystoneSettings().QuiesceTimeout;
 
-        // 依赖消失 → 依赖方走完整卸载闸门（ADR-0007 决策 3）
+        // 依赖门控（ADR-0007 决策 3）：依赖消失 → 卸载；依赖重现 → 自动重启（G-C2 re-arm）。
+        // 订阅保持整个 runtime 生命周期（StopCoreAsync 不销毁，DisposeAsync 才清理）。
         _dependencySubscription = registry.Subscribe(args =>
         {
-            if (!args.Available && manifest.Inject.Contains(args.ServiceName, StringComparer.Ordinal)
-                && State == PluginLifecycleState.Active)
+            if (!manifest.Inject.Contains(args.ServiceName, StringComparer.Ordinal))
             {
+                return;
+            }
+
+            if (args.Available && State is PluginLifecycleState.Disposed or PluginLifecycleState.Unloading)
+            {
+                // G-C2：依赖重现 → 自动重启（对齐 Cordis epoch 驱动）
+                _ = StartAsync();
+            }
+            else if (!args.Available && State == PluginLifecycleState.Active)
+            {
+                // 依赖消失 → 依赖方走完整卸载闸门
                 _ = StopCoreAsync();
             }
         });
@@ -128,7 +139,7 @@ public sealed class PluginRuntime : IAsyncDisposable
         }
     }
 
-    /// <summary>完整卸载闸门（quiesce，ADR-0005 决策 2）→ DISPOSED。</summary>
+    /// <summary>完整卸载闸门（quiesce，ADR-0005 决策 2）→ DISPOSED。显式调用 → 销毁依赖订阅（终态）。</summary>
     public async Task StopAsync()
     {
         lock (_lock)
@@ -140,6 +151,8 @@ public sealed class PluginRuntime : IAsyncDisposable
         }
 
         await StopCoreAsync().ConfigureAwait(false);
+        _dependencySubscription?.Dispose();
+        _dependencySubscription = null; // 显式停止 = 终态，不再 re-arm（G-C2 仅依赖消失路径保留）
     }
 
     /// <summary>restart：走完整卸载闸门 + 重新启动（FAILED 恢复/显式运维，ADR-0005 决策 3）。</summary>
@@ -173,18 +186,25 @@ public sealed class PluginRuntime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopAsync().ConfigureAwait(false);
+        _dependencySubscription?.Dispose();
+        _dependencySubscription = null;
     }
 
     private async Task StartCoreAsync()
     {
         lock (_lock)
         {
-            if (_state is not (PluginLifecycleState.Pending or PluginLifecycleState.Failed))
+            // G-C2：Disposed 也允许启动（依赖重现自动重启的恢复路径）
+            if (_state is not (PluginLifecycleState.Pending or PluginLifecycleState.Failed or PluginLifecycleState.Disposed))
             {
                 throw new KeystoneException(
                     ErrorCode.LifecycleInvalidState,
                     $"cannot start plugin '{_manifest.Id}' from state '{_state}'");
             }
+
+            _error = null;
+            _settled = null;
+            _state = PluginLifecycleState.Pending;
         }
 
         SetState(PluginLifecycleState.Pending);
@@ -281,8 +301,7 @@ public sealed class PluginRuntime : IAsyncDisposable
             _registry.Unregister(service, _manifest.Id);
         }
 
-        _dependencySubscription?.Dispose();
-        _dependencySubscription = null;
+        // G-C2：依赖订阅保留（依赖重现 → 自动重启）；DisposeAsync（真正销毁）才清理
         lock (_lock)
         {
             _plugin = null;
