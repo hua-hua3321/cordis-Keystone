@@ -36,6 +36,7 @@ C# 版 Cordis 插件框架：配置驱动、多实例隔离、热重载、中间
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
+| [architecture/00-tech-stack.md](architecture/00-tech-stack.md) | 技术体系：技术基线（.NET 10 + C# 14）+ 已确认技术栈清单（Proto.Actor 1.8 等） | 标准 |
 | [architecture/01-overview.md](architecture/01-overview.md) | 方案总览：三层架构（配置层/管理层/能力域 actor） | 标准 |
 | [architecture/02-plugin-model.md](architecture/02-plugin-model.md) | 插件模型：接口白名单、键控服务、子容器、热重载 | 标准 |
 | [architecture/03-context.md](architecture/03-context.md) | Context 设计：作用域链、状态外置、事件分层 | 标准 |
