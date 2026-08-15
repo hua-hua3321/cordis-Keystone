@@ -24,6 +24,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     private readonly HashSet<string> _failedEntries = new(StringComparer.Ordinal);
     private ContextFacade? _rootContext;
     private Keystone.Config.Persistence.ConfigFileWriter? _configWriter; // DC-15：CRUD 落盘写回
+    private Keystone.Runtime.Persistence.FactRetentionScheduler? _retention; // DC-18：定时 Prune
     private CapabilityDomain? _capabilityDomain;
     private IReadOnlyList<string> _uncollectedPlugins = [];
     private bool _shutdown;
@@ -100,6 +101,14 @@ public sealed class KeystoneHost : IAsyncDisposable
         // 6-7. 并行加载：依赖门控（PENDING 等待）天然实现拓扑序
         // DC-16：disabled 挂起条目（含父组继承）不参与加载拓扑
         await Task.WhenAll(EnumerateActiveLeaves(entries).Select(LoadEntryAsync)).ConfigureAwait(false);
+
+        // DC-18：事实保留策略 → 定时 Prune（随宿主启停；失败降级续跑）
+        if (_options.RetentionPolicy is { } retention && _options.EventStore is { } eventStore)
+        {
+            _retention = new Keystone.Runtime.Persistence.FactRetentionScheduler(
+                eventStore, retention, _options.PruneInterval);
+            _retention.Start();
+        }
 
         // 8. 就绪
         _shutdown = false;
@@ -420,6 +429,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     {
         await ShutdownAsync().ConfigureAwait(false);
         _configWriter?.Dispose(); // DC-15：写回器随宿主释放
+        _retention?.Dispose(); // DC-18：定时 Prune 随宿主停止
     }
 
     // ── 内部 ──

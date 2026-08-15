@@ -51,6 +51,16 @@ public sealed class KeystoneHostOptions
     /// </summary>
     public string? ConfigFilePath { get; set; }
 
+    /// <summary>
+    /// 事实保留策略（DC-18，ADR-0009 决策 3）：配置后宿主启动定时 Prune
+    /// （周期 <see cref="PruneInterval"/>，随宿主启停；失败降级续跑）；
+    /// null（默认）= 不自动清理（嵌入方手动 PruneAsync）。
+    /// </summary>
+    public Keystone.Runtime.Persistence.RetentionPolicy? RetentionPolicy { get; set; }
+
+    /// <summary>定时 Prune 周期（默认 1 小时；仅 <see cref="RetentionPolicy"/> 配置时生效）。</summary>
+    public TimeSpan PruneInterval { get; set; } = TimeSpan.FromHours(1);
+
     /// <summary>是否启用能力域（01 §2 管理层职责；默认开启，纯生命周期宿主可关闭）。</summary>
     public bool EnableCapabilityDomain { get; set; } = true;
 

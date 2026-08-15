@@ -78,6 +78,7 @@ public sealed class EventBus : IEventBus
             Capability = fact.Capability,
             PayloadBytes = fact.Payload,
             Timestamp = DateTimeOffset.UtcNow,
+            Durable = fact.Durable, // DC-18：分级随事实落盘（重放/归档方可见"必须存活"标记）
         };
 
         try

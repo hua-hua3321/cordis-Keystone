@@ -8,18 +8,22 @@ namespace Keystone.Runtime.Persistence;
 /// 序列化经 <see cref="IContractSerializer"/> 抽象（ADR-0004：默认 MessagePack，可注入 JSON 审计）。
 /// append-only（FileMode.Append + 追加锁串行）；崩溃恢复 = 忽略损坏尾帧（完整前缀可恢复）；
 /// 每次追加 FlushAsync（帧完整性）。
+/// DC-18（ADR-0009 决策 3 保留策略）：Prune 配置 archivePath（构造参数）时被清事实
+/// 先归档（同帧格式追加，可重放/审计）再从主文件移除；未配置 = 纯删除（原行为）。
 /// </summary>
 public sealed class FileEventStore : IEventStore
 {
     private readonly string _path;
+    private readonly string? _archivePath;
     private readonly IContractSerializer _serializer;
     private readonly SemaphoreSlim _appendLock = new(1, 1);
     private long _sequence;
 
-    public FileEventStore(string path, IContractSerializer? serializer = null)
+    public FileEventStore(string path, IContractSerializer? serializer = null, string? archivePath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = path;
+        _archivePath = archivePath;
         _serializer = serializer ?? new MessagePackContractSerializer();
         _sequence = LoadSequence();
     }
@@ -110,6 +114,25 @@ public sealed class FileEventStore : IEventStore
         var removed = all.Count - kept.Count;
         if (removed > 0)
         {
+            // DC-18：归档被清事实（同帧格式追加——可重放/审计；配置 archivePath 才启用）
+            if (_archivePath is not null)
+            {
+                var dropped = all.Where(f => !kept.Contains(f)).ToList();
+                await using (var archive = new FileStream(_archivePath, FileMode.Append, FileAccess.Write, FileShare.None))
+                {
+                    foreach (var fact in dropped)
+                    {
+                        var archivePayload = _serializer.Serialize(fact);
+                        var archiveHeader = new byte[4];
+                        BinaryPrimitives.WriteInt32BigEndian(archiveHeader, archivePayload.Length);
+                        await archive.WriteAsync(archiveHeader, cancellationToken).ConfigureAwait(false);
+                        await archive.WriteAsync(archivePayload, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    await archive.FlushAsync(cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             var tmp = _path + ".prune.tmp";
             await using (var stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
             {
