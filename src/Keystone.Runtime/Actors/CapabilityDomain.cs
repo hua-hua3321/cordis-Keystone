@@ -48,16 +48,19 @@ public sealed class CapabilityDomain : IAsyncDisposable
     /// Spawn 一个能力域实例（instanceName 唯一；handler 处理跨域请求）。
     /// <paramref name="middlewares"/> = 插件中间件链（01 §2：actor 持管道，中间件包裹 handler，
     /// before/after/短路语义，ADR-0006 waterfall）。
+    /// <paramref name="parentContext"/> = 实例 context 的父（01 §4：接入宿主 root 的服务链 + 共享事件总线；
+    /// 缺省 null = 独立实例）。
     /// </summary>
     public CapabilityHandle Spawn(
         string instanceName,
         Func<TaskEnvelope, Task<TaskResultEnvelope>> handler,
-        IReadOnlyList<IMiddleware>? middlewares = null)
+        IReadOnlyList<IMiddleware>? middlewares = null,
+        Keystone.Runtime.Context.IContext? parentContext = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
         ArgumentNullException.ThrowIfNull(handler);
 
-        var props = Props.FromProducer(() => new CapabilityActor(instanceName, handler, middlewares));
+        var props = Props.FromProducer(() => new CapabilityActor(instanceName, handler, middlewares, parentContext));
         var pid = _system.Root.SpawnNamed(props, $"{_name}-{instanceName}");
         return new CapabilityHandle(this, pid);
     }

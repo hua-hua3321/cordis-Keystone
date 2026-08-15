@@ -61,6 +61,7 @@ created: 2026-08-15
 | P31 差距 G-C8 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 热更新 API（§7.31：ReloadPlugin/UpdatePlugin，231/231 全绿） | §7.31 |
 | P32 差距 G-C11 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 日志级别默认阈值（§7.32：三级过滤对齐 Cordis levels，236/236 全绿） | §7.32 |
 | P33 多实例集成 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 宿主级多实例集成测试（§7.33：插件组多实例并行/隔离/管道独立/TaskId/事件，237/237 全绿） | §7.33 |
+| P34 文档达标 DC-1 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 实例级持久 context（§7.34：01 §4 actor 持 context 兑现，238/238 全绿） | §7.34 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -135,6 +136,7 @@ created: 2026-08-15
 | ID-26 | 2026-08-15 | P30 | 日志导出器抽象（G-C7）：`ILogSink`（Write(LogRecord)，对齐 Cordis Exporter）+ `ConsoleLogSink`（结构化行 + 可选 ANSI 配色）；RingBufferLoggerProvider sinks 注入 + 分发 | 兑现 05 §5 "Console（默认）+ 可选 File/exporter"承诺；日志从内存快照变为可输出 | `src/Keystone.Runtime/Logging/`（ILogSink/ConsoleLogSink/RingBufferLoggerProvider） | 否（16-cordis-gap-review G-C7 备注） |
 | ID-27 | 2026-08-15 | P31 | 热更新 API（G-C8）：`ReloadPluginAsync`（冷重启：重编译 + 新 ALC）+ `UpdatePluginAsync`（热更新：config 变 → PatchContext 瀑布可否决 → 重载）；FileSystemWatcher 由嵌入方经 ConfigUpdate 事件接线 | 兑现 09 §5 ReloadPlugin/UpdatePlugin + 08 §6.1 变更分级；宿主用 YAML 字符串启动无文件源，watcher 不内置 | `src/Keystone.Hosting/KeystoneHost.cs` | 否（16-cordis-gap-review G-C8 备注） |
 | ID-28 | 2026-08-15 | P32 | 日志级别默认阈值（G-C11）：RingBufferLoggerProvider 三级过滤——按 category 覆盖 → defaultLevel → 全局默认 Information；IsEnabled 无 override 不再恒 true | 对齐 Cordis levels[name] ?? levels.default ?? INFO（logger.ts:155）；Debug 日志默认被过滤（真实语义缺陷修复） | `src/Keystone.Runtime/Logging/RingBufferLoggerProvider.cs` | 否（16-cordis-gap-review G-C11 备注） |
+| ID-29 | 2026-08-15 | P34 | 实例级持久 context（DC-1）：CapabilityActor 构造时创建实例 context（父 = parentContext 可选），跨请求复用；中间件/请求在实例 context 上执行 | 01 §3/§4"actor=context 同生命周期"兑现；此前每请求新建 context 状态丢失；父链接入插件服务解析 + 共享事件总线（03 §2） | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | 否（17-doc-compliance-audit DC-1） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -576,6 +578,18 @@ created: 2026-08-15
 | 2026-08-15 | W33-01 | 多实例集成测试：calc 插件组（业务）+ observer（事件观察）+ audit-mw（管道中间件）——宿主启动后 spawn 3 实例并行处理不同任务（add/mul/sub），验证多实例隔离（独立结果）/管道每实例独立（before/after）/TaskId 贯穿/事件观察（共享总线 ID-08） | 测试（集成） | 01 §4；03 §2.2 | `tests/Keystone.Hosting.Tests/MultiInstanceIntegrationTests.cs` | 1 集成用例绿（3 次连跑稳定） | ✅ |
 | 2026-08-15 | W33-02 | 全量回归 237/237 + Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.34 P34 文档达标 DC-1：实例级持久 context
+
+> 用户指出"按文档要求做"。workflow 审计 30 项差距（5 域 × 6），DC-1 是核心（01 §4 每实例独立持久 context，此前实现每请求新建）。本次修复 + 审计文档产出。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W34-01 | workflow 并行审计：5 域（core-context/plugin-lifecycle/pipeline-config/sdk-ai/security-aot）对照文档 vs 实现 → 30 项差距（高 12 + 中 18） | 审计 | — | — | 5 份域审计 + 汇总 | ✅ |
+| 2026-08-15 | W34-02 | **DC-1 修复**：CapabilityActor 持实例级持久 context（构造时创建，跨请求复用；父 = parentContext 可选）；中间件/请求在实例 context 上执行（接入父链服务解析 + 共享事件总线） | 实现（TDD） | 01 §3/§4；03 §2 | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | `Instance_context_is_persistent_across_requests`（中间件经 ctx 跨 3 请求累积=3） | ✅ |
+| 2026-08-15 | W34-03 | 全量回归 238/238 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
+> **审计发现**：30 项差距集中在"功能实现了但未按文档接线/语义简化"（quiesce 五步缺拒绝/排空、监督缺失、超时熔断死代码、分层叠加孤立、静态插值死代码、事件持久化孤立、管道无原子替换等）——见 17-doc-compliance-audit.md（待产出）。
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -665,6 +679,9 @@ created: 2026-08-15
 | W32-01 | ID-28 | `Logging/RingBufferLoggerProvider.cs` | `LogLevelThresholdTests`（5） |
 | ID-28 | G-C11 | `Logging/`（级别过滤） | W32-01~02 |
 | W33-01 | 01 §4 | `tests/Keystone.Hosting.Tests/MultiInstanceIntegrationTests.cs` | 集成用例绿 |
+| W34-01 | — | 17-doc-compliance-audit.md（30 项差距） | 审计闭环 |
+| W34-02 | ID-29 | `Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | 持久 context 测试绿 |
+| ID-29 | 01 §3/§4 | `Actors/`（实例 context） | W34-02 |
 
 ## 9. 维护规则
 

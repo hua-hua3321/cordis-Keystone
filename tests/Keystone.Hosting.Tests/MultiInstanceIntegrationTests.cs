@@ -101,6 +101,57 @@ public class MultiInstanceIntegrationTests
     }
 
     [Fact]
+    public async Task Instance_context_is_persistent_across_requests()
+    {
+        // DC-1（01 §4）：actor 持实例级持久 context——跨请求状态经实例 context 驻留。
+        // 中间件把计数存到 ctx（若每请求新建 context，计数不会累积）。
+        await using var host = new KeystoneHost(Options());
+        await host.StartAsync("""
+            - id: calc
+              name: ./plugins/calc
+            """);
+
+        var domain = host.GetCapabilityDomain()!;
+        var counterMiddleware = new CounterMiddleware();
+        var handle = domain.Spawn("stateful",
+            envelope => Task.FromResult(new Keystone.Core.Contracts.TaskResultEnvelope
+            {
+                TaskId = envelope.TaskId,
+                Succeeded = true,
+                Type = Keystone.Core.Contracts.TaskResultType.Completed,
+            }),
+            [counterMiddleware]);
+
+        await RequestAsync(handle, "stateful", "add", "1,2");
+        await RequestAsync(handle, "stateful", "add", "3,4");
+        await RequestAsync(handle, "stateful", "add", "5,6");
+
+        // 实例 context 持久：中间件经 ctx 存取计数（每请求新建 context 则 Get 到 null，恒 1）
+        Assert.Equal(3, counterMiddleware.RequestCount);
+
+        await host.ShutdownAsync();
+    }
+
+    /// <summary>经 ctx 跨请求计数（验证实例 context 持久，DC-1）：计数存 ctx，下请求从 ctx 读。</summary>
+    private sealed class CounterMiddleware : Keystone.Runtime.Pipeline.IMiddleware
+    {
+        public string Id => "counter";
+
+        public int Order => 1;
+
+        public int RequestCount;
+
+        public async Task InvokeAsync(Keystone.Runtime.Context.IPluginContext ctx, Keystone.Runtime.Pipeline.RequestDelegate next)
+        {
+            // 从实例 context 读累计计数（每请求新建则读不到默认 0 → 恒 1）
+            var prior = ctx.TryGet<object>("counter") is int n ? n : 0;
+            RequestCount = prior + 1;
+            ctx.Provide("counter", RequestCount);
+            await next(ctx);
+        }
+    }
+
+    [Fact]
     public async Task Multiple_instances_run_in_parallel_with_isolation()
     {
         await using var host = new KeystoneHost(Options());
