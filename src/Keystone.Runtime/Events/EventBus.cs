@@ -93,9 +93,9 @@ public sealed class EventBus : IEventBus
 
             MarkOnce(entry);
             var result = await ((Func<TEvent, Task<object?>>)entry.Handler)(e).ConfigureAwait(false);
-            if (result is not null)
+            if (IsBailed(result))
             {
-                return result; // 首个非 null 短路
+                return result; // 首个决策值短路（对齐 Cordis isBailed：null/false 不短路）
             }
         }
 
@@ -113,7 +113,7 @@ public sealed class EventBus : IEventBus
 
             MarkOnce(entry);
             var result = ((Func<TEvent, object?>)entry.Handler)(e);
-            if (result is not null)
+            if (IsBailed(result))
             {
                 return result;
             }
@@ -193,6 +193,13 @@ public sealed class EventBus : IEventBus
     /// G15 过滤：监听者是发布者（publisher）的祖先/自身才投递；global 跳过。
     /// 纯总线场景（无 context 上下文，publisher/scope 均 null）→ 放行。
     /// </summary>
+    /// <summary>
+    /// G-C4（对齐 Cordis isBailed，events.ts:13-15）：决策值判定——null/false 不算决策（不短路），
+    /// 其余值（含空字符串/0）算决策。
+    /// </summary>
+    private static bool IsBailed(object? value)
+        => value is not null && value is not false;
+
     private static bool ShouldDispatch(HandlerEntry entry, IContext? publisher)
     {
         if (entry.Options.Global)

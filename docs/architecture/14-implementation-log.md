@@ -54,6 +54,7 @@ created: 2026-08-15
 | P24 差距 G-C1 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 插件配置注入（§7.24：EntryOptions.Config → schema 校验 → 默认值 → InitializeAsync，212/212 全绿） | §7.24 |
 | P25 差距 G-C2 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 依赖恢复 re-arm（§7.25：依赖重现自动重启，213/213 全绿） | §7.25 |
 | P26 差距 G-C3 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 服务值卸载注销（§7.26：运行期 Provide 值卸载后注销，215/215 全绿） | §7.26 |
+| P27 差距 G-C4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 事件 false 短路语义（§7.27：serial/bail 对齐 isBailed，218/218 全绿） | §7.27 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -122,6 +123,7 @@ created: 2026-08-15
 | ID-20 | 2026-08-15 | P24 | 插件配置注入（G-C1）：Host 经 `ConfigSchemaProvider`（条目→schema）+ `ConfigResolver`（校验+默认值）解析 entry.Config 传入 `InitializeAsync`；无 schema 直传；校验失败 = 该插件 FAILED（09 §2 隔离，不整域回滚） | 兑现 Cordis resolveConfig（fiber.ts:641）+ 10-plugin-sdk §2"apply 收完整配置"；ConfigSchema/Resolver 从零调用接入宿主 | `KeystoneHostOptions`、`KeystoneHost`、`PluginLoader`、`PluginRuntime` | 否（16-cordis-gap-review G-C1 备注） |
 | ID-21 | 2026-08-15 | P25 | 依赖恢复 re-arm（G-C2）：依赖重现（Available=true）→ Disposed/Unloading 依赖方自动 StartAsync；订阅生命周期区分——自动卸载（依赖消失）保留订阅待 re-arm，显式 StopAsync/热重载销毁订阅（终态，防 ALC 泄漏） | 兑现 Cordis epoch 驱动（fiber.ts:625-639）+ ADR-0007 决策 3 的对称性（重现→重启）；热重载测试暴露旧 ALC 被订阅持有 → 显式停止销毁 | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（16-cordis-gap-review G-C2 备注） |
 | ID-22 | 2026-08-15 | P26 | 服务值卸载注销（G-C3）：`IServiceStore.Remove`（属主校验）+ ContextFacade 属主追踪（_ownedServices）+ PluginRuntime 卸载钩子 RemoveOwnedServices——运行期 Provide 值在插件卸载后从 root/本地 store 注销 | 兑现 Cordis provide disposer（reflect.ts）；防依赖方拿陈旧值；manifest 名由 registry.Unregister 处理、运行期名由 store.Remove 处理（双轨补齐） | `IServiceStore`、`ServiceStore`、`ContextFacade`、`PluginRuntime` | 否（16-cordis-gap-review G-C3 备注） |
+| ID-23 | 2026-08-15 | P27 | 事件决策短路语义（G-C4）：`IsBailed` 对齐 Cordis isBailed——serial/bail 中 null/false 不算决策值（不短路），0/空串等其余值短路 | events.ts:13-15 语义精确对齐；避免返回 false 的监听器提前截断链 | `src/Keystone.Runtime/Events/EventBus.cs` | 否（16-cordis-gap-review G-C4 备注） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -498,6 +500,15 @@ created: 2026-08-15
 | 2026-08-15 | W26-03 | PluginRuntime.StopCoreAsync 卸载钩子：插件 dispose 后调用 RemoveOwnedServices（运行期值注销） | 实现（TDD） | G-C3 | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | `ServiceValueUnloadTests`（2） | ✅ |
 | 2026-08-15 | W26-04 | 全量回归 215/215 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.27 P27 差距 G-C4：事件 false 短路语义
+
+> 16-cordis-gap-review G-C4（🟡 中危）：serial/bail 的 `false` 短路语义偏差——Cordis `isBailed` 排除 false/null，Keystone `result is not null` 把 false 当短路。本次对齐。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W27-01 | `EventBus.IsBailed`（对齐 Cordis isBailed：null/false 不短路）+ PublishSerialAsync/PublishBail 改用 | 实现（TDD） | G-C4；events.ts:13-15 | `src/Keystone.Runtime/Events/EventBus.cs` | `BailSemanticsTests`（3） | ✅ |
+| 2026-08-15 | W27-02 | 全量回归 218/218 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -574,6 +585,8 @@ created: 2026-08-15
 | ID-21 | G-C2 | `Runtime/Plugins/Lifecycle/PluginRuntime.cs` | W25-01~04 |
 | W26-01~03 | ID-22 | `Context/IServiceStore.cs`、`ServiceStore.cs`、`ContextFacade.cs`、`PluginRuntime.cs` | `ServiceValueUnloadTests`（2） |
 | ID-22 | G-C3 | `Context/`（值注销） | W26-01~04 |
+| W27-01 | ID-23 | `Events/EventBus.cs` | `BailSemanticsTests`（3） |
+| ID-23 | G-C4 | `Events/EventBus.cs` | W27-01~02 |
 
 ## 9. 维护规则
 

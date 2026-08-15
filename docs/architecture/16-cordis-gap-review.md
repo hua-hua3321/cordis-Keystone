@@ -25,7 +25,7 @@ created: 2026-08-15
 
 | # | 差距 | Cordis 依据 | Keystone 现状 | 影响 |
 |---|------|-----------|--------------|------|
-| G-C4 | **serial/bail 的 false 短路语义偏差** | `isBailed` 排除 false/null/undefined（events.ts:13-15） | `result is not null`（EventBus.cs:96/116）——`false` 被误判为短路 | 返回 false 的监听器提前截断链，Cordis 行为下不短路 |
+| G-C4 | **serial/bail 的 false 短路语义偏差** | `isBailed` 排除 false/null/undefined（events.ts:13-15） | ~~`result is not null`（EventBus.cs:96/116）——`false` 被误判为短路~~ **✅ 已闭合（P27）**：`IsBailed` 对齐（null/false 不短路，0/空串短路） | 返回 false 的监听器不再提前截断链 |
 | G-C5 | **M4 方法级延迟注入未落地** | `@Inject` 方法调用等到服务可用（registry.ts:45-59） | 12 文档声称 `Lazy<Task<T>>`，实现 grep 零命中；`IPluginContext.Get` 同步抛 GatingServiceNotFound | 文档声称已映射但实现缺失 |
 | G-C6 | **waterfall 发布者注入 terminal 缺失** | 发布者注入最内层 next，返回最外层值（events.ts:234-243） | `PublishWaterfallAsync` terminal 硬编码 `Task.CompletedTask`（EventBus.cs:144） | 无法表达"内置行为可被否决"的 Cordis 核心用法 |
 | G-C7 | **日志导出器抽象缺失** | Exporter 可插拔 sink（多导出器/per-exporter formatters/levels/maxLength，logger.ts:41-131） | 仅内建 RingBuffer + `GetSnapshot()`；无第二输出挂载点；无终端 sink（日志实际不可见） | 观测性缺口：日志只能内存快照，无法输出 |
