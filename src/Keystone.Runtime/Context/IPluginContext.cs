@@ -18,6 +18,13 @@ public interface IPluginContext
     /// <summary>按服务名可选解析。</summary>
     T? TryGet<T>(string serviceName);
 
+    /// <summary>
+    /// 方法级延迟注入（G-C5/M4，对齐 Cordis @Inject 方法级，registry.ts:45-59）：
+    /// 返回 <see cref="Lazy{T}"/>——首次访问 .Value 才解析（服务不可用则抛 GatingServiceNotFound）。
+    /// 用途：初始化时不解析、方法执行时服务已就绪（避免初始化期依赖未注入）。
+    /// </summary>
+    Lazy<Task<T>> GetLazy<T>(string serviceName);
+
     /// <summary>提供服务（属主 = 本插件；rebind/属主校验，03 §2.1/§2.3）。</summary>
     void Provide<T>(string serviceName, T instance);
 

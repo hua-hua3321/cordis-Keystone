@@ -62,6 +62,13 @@ public sealed class ContextFacade : IPluginContext, IContext
         return Resolve<T>(serviceName);
     }
 
+    /// <summary>G-C5/M4 方法级延迟注入：首次访问 .Value 才解析（对齐 Cordis @Inject 方法级）。</summary>
+    public Lazy<Task<T>> GetLazy<T>(string serviceName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serviceName);
+        return new Lazy<Task<T>>(() => Task.FromResult(Get<T>(serviceName)));
+    }
+
     /// <summary>
     /// 服务解析链（03 §2 作用域链 / ADR-0007 依赖门控）：先查本 scope，再沿父链向上（→ 根）。
     /// 父链 = 服务级组合（inject 跨插件可见）；isolate 隔离经独立 context 链天然达成（不共享父）。

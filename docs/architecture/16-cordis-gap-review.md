@@ -26,7 +26,7 @@ created: 2026-08-15
 | # | 差距 | Cordis 依据 | Keystone 现状 | 影响 |
 |---|------|-----------|--------------|------|
 | G-C4 | **serial/bail 的 false 短路语义偏差** | `isBailed` 排除 false/null/undefined（events.ts:13-15） | ~~`result is not null`（EventBus.cs:96/116）——`false` 被误判为短路~~ **✅ 已闭合（P27）**：`IsBailed` 对齐（null/false 不短路，0/空串短路） | 返回 false 的监听器不再提前截断链 |
-| G-C5 | **M4 方法级延迟注入未落地** | `@Inject` 方法调用等到服务可用（registry.ts:45-59） | 12 文档声称 `Lazy<Task<T>>`，实现 grep 零命中；`IPluginContext.Get` 同步抛 GatingServiceNotFound | 文档声称已映射但实现缺失 |
+| G-C5 | **M4 方法级延迟注入未落地** | `@Inject` 方法调用等到服务可用（registry.ts:45-59） | ~~12 文档声称 `Lazy<Task<T>>`，实现 grep 零命中；`IPluginContext.Get` 同步抛 GatingServiceNotFound~~ **✅ 已闭合（P29）**：`GetLazy<T>` 返回 `Lazy<Task<T>>`——首次访问解析（Lazy 缓存，只解析一次） | 文档声称已映射但实现缺失 → 已补齐 |
 | G-C6 | **waterfall 发布者注入 terminal 缺失** | 发布者注入最内层 next，返回最外层值（events.ts:234-243） | ~~`PublishWaterfallAsync` terminal 硬编码 `Task.CompletedTask`（EventBus.cs:144）~~ **✅ 已闭合（P28）**：terminal 可注入 + 返回值；监听器不调 next → 否决（null） | "内置行为可被否决"核心用法可用 |
 | G-C7 | **日志导出器抽象缺失** | Exporter 可插拔 sink（多导出器/per-exporter formatters/levels/maxLength，logger.ts:41-131） | 仅内建 RingBuffer + `GetSnapshot()`；无第二输出挂载点；无终端 sink（日志实际不可见） | 观测性缺口：日志只能内存快照，无法输出 |
 | G-C8 | **热更新触发缺失** | 文件监听 → 原子替换/重载（09 承诺；fiber.ts update/restart） | `PluginLoader.ReloadAsync` 存在但**无 FileSystemWatcher 接线**；`KeystoneHost` 无 `ReloadPlugin`/`UpdatePlugin` API（09 §5 表格承诺未实现） | 热更新原语有，触发机制无 |
