@@ -20,6 +20,7 @@ public sealed class PluginRuntime : IAsyncDisposable
     private readonly Func<string, IPluginContext> _contextFactory;
     private readonly IReadOnlyDictionary<string, object?> _config;
     private readonly TimeSpan _quiesceTimeout;
+    private readonly TimeSpan _dependencyTimeout;
     private readonly Lock _lock = new();
 
     private PluginLifecycleState _state = PluginLifecycleState.Pending;
@@ -35,7 +36,8 @@ public sealed class PluginRuntime : IAsyncDisposable
         IServiceRegistry registry,
         Func<string, IPluginContext> contextFactory,
         IReadOnlyDictionary<string, object?>? config = null,
-        TimeSpan? quiesceTimeout = null)
+        TimeSpan? quiesceTimeout = null,
+        TimeSpan? dependencyTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(pluginFactory);
@@ -48,6 +50,7 @@ public sealed class PluginRuntime : IAsyncDisposable
         _contextFactory = contextFactory;
         _config = config ?? new Dictionary<string, object?>(StringComparer.Ordinal);
         _quiesceTimeout = quiesceTimeout ?? new KeystoneSettings().QuiesceTimeout;
+        _dependencyTimeout = dependencyTimeout ?? new KeystoneSettings().DependencyWaitTimeout;
 
         // 依赖门控（ADR-0007 决策 3）：依赖消失 → 卸载；依赖重现 → 自动重启（G-C2 re-arm）。
         // 订阅保持整个 runtime 生命周期（StopCoreAsync 不销毁，DisposeAsync 才清理）。
@@ -208,7 +211,10 @@ public sealed class PluginRuntime : IAsyncDisposable
         }
 
         SetState(PluginLifecycleState.Pending);
-        await WaitForDependenciesAsync().ConfigureAwait(false);
+        if (!await AwaitDependenciesOrFailAsync().ConfigureAwait(false))
+        {
+            return; // 依赖超时 → 已置 FAILED
+        }
 
         SetState(PluginLifecycleState.Loading);
         try
@@ -251,12 +257,35 @@ public sealed class PluginRuntime : IAsyncDisposable
     private bool DependenciesSatisfied()
         => _manifest.Inject.All(service => _registry.IsAvailable(service));
 
+    /// <summary>DC-5：等待依赖；超时 → FAILED（ADR-0007：不无限 PENDING）。返回 false = 已置 FAILED。</summary>
+    private async Task<bool> AwaitDependenciesOrFailAsync()
+    {
+        try
+        {
+            await WaitForDependenciesAsync().ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            lock (_lock)
+            {
+                _error = ex is KeystoneException ke
+                    ? ke
+                    : new KeystoneException(ErrorCode.GatingDependencyTimeout, $"plugin '{_manifest.Id}' dependency wait failed", ex);
+            }
+
+            SetState(PluginLifecycleState.Failed);
+            CompleteSettled();
+            return false;
+        }
+    }
+
     /// <summary>事件驱动等待依赖（ADR-0007 决策 3：服务可用性事件 → 重新检查，非轮询）。</summary>
-    private Task WaitForDependenciesAsync()
+    private async Task WaitForDependenciesAsync()
     {
         if (DependenciesSatisfied())
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -277,7 +306,20 @@ public sealed class PluginRuntime : IAsyncDisposable
             tcs.TrySetResult();
         }
 
-        return tcs.Task;
+        // DC-5（ADR-0007 风险表）：依赖永不就绪 → 启动超时 → FAILED（不无限 PENDING 挂起）
+        using var timeoutCts = new CancellationTokenSource(_dependencyTimeout);
+        try
+        {
+            await tcs.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            subscription?.Dispose();
+            throw new KeystoneException(
+                ErrorCode.GatingDependencyTimeout,
+                $"plugin '{_manifest.Id}' dependency wait timed out after {_dependencyTimeout.TotalSeconds}s: "
+                + string.Join(", ", _manifest.Inject.Where(s => !_registry.IsAvailable(s))));
+        }
     }
 
     private async Task StopCoreAsync()

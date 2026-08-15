@@ -63,6 +63,7 @@ created: 2026-08-15
 | P33 多实例集成 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 宿主级多实例集成测试（§7.33：插件组多实例并行/隔离/管道独立/TaskId/事件，237/237 全绿） | §7.33 |
 | P34 文档达标 DC-1 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 实例级持久 context（§7.34：01 §4 actor 持 context 兑现，238/238 全绿） | §7.34 |
 | P35 文档达标 DC-3/DC-6 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | quiesce 入口拒绝+超时审计 + rebind 报错+热重载顺序（§7.35，244/244 全绿） | §7.35 |
+| P36 文档达标 DC-5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 依赖超时接线（§7.36：依赖永不就绪→FAILED，246/246 全绿） | §7.36 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -139,6 +140,7 @@ created: 2026-08-15
 | ID-28 | 2026-08-15 | P32 | 日志级别默认阈值（G-C11）：RingBufferLoggerProvider 三级过滤——按 category 覆盖 → defaultLevel → 全局默认 Information；IsEnabled 无 override 不再恒 true | 对齐 Cordis levels[name] ?? levels.default ?? INFO（logger.ts:155）；Debug 日志默认被过滤（真实语义缺陷修复） | `src/Keystone.Runtime/Logging/RingBufferLoggerProvider.cs` | 否（16-cordis-gap-review G-C11 备注） |
 | ID-29 | 2026-08-15 | P34 | 实例级持久 context（DC-1）：CapabilityActor 构造时创建实例 context（父 = parentContext 可选），跨请求复用；中间件/请求在实例 context 上执行 | 01 §3/§4"actor=context 同生命周期"兑现；此前每请求新建 context 状态丢失；父链接入插件服务解析 + 共享事件总线（03 §2） | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | 否（17-doc-compliance-audit DC-1） |
 | ID-30 | 2026-08-15 | P35 | 文档达标 DC-3/DC-6：①全局 quiesce 补入口拒绝 + 总超时 + 未收敛审计（09 §4）；②rebind 重复注册报错 + 热重载先卸载再启动（02 §3/ADR-0007） | 兑现 09 §4 六步关闭语义与 rebind 语义；热重载顺序修复防同名注册冲突/误删 | `KeystoneHost`、`KeystoneHostOptions`、`ServiceRegistry`、`PluginLoader` | 否（17-doc-compliance-audit DC-3/DC-6） |
+| ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -600,6 +602,15 @@ created: 2026-08-15
 | 2026-08-15 | W35-02 | DC-6：ServiceRegistry.Register 重复（他属主）→ 报错（rebind 语义）；IsAvailable 加锁；ReloadPluginAsync/PluginLoader.ReloadAsync 改**先卸载旧再启动新**（避免同名注册冲突/误删） | 实现（TDD） | 02 §3；ADR-0007 | `src/Keystone.Runtime/Plugins/Services/ServiceRegistry.cs`、`Loading/PluginLoader.cs`、`KeystoneHost.cs` | `RebindAndReloadTests`（3） | ✅ |
 | 2026-08-15 | W35-03 | 全量回归 244/244 + Runtime/Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` × 2 | ✅ |
 
+### 7.36 P36 文档达标 DC-5：依赖超时接线
+
+> 17-doc-compliance-audit DC-5（🔴）：依赖永不就绪 → PENDING 无限挂起（DependencyWaitTimeout 配置存在但未接线）。本次接入：依赖等待超时 → FAILED（GatingDependencyTimeout，ADR-0007 风险表）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W36-01 | PluginRuntime：构造器增 dependencyTimeout（默认 KeystoneSettings.DependencyWaitTimeout 30s）；WaitForDependenciesAsync 加超时（超时抛 GatingDependencyTimeout）；AwaitDependenciesOrFailAsync 提取（超时 → FAILED + 错误可查） | 实现（TDD） | DC-5；ADR-0007 | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | `DependencyTimeoutTests`（2） | ✅ |
+| 2026-08-15 | W36-02 | 全量回归 246/246 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 > **审计发现**：30 项差距集中在"功能实现了但未按文档接线/语义简化"（quiesce 五步缺拒绝/排空、监督缺失、超时熔断死代码、分层叠加孤立、静态插值死代码、事件持久化孤立、管道无原子替换等）——见 17-doc-compliance-audit.md（待产出）。
 
 ## 8. 回溯索引（三向映射）
@@ -697,6 +708,8 @@ created: 2026-08-15
 | W35-01 | ID-30 | `Hosting/KeystoneHost.cs`、`KeystoneHostOptions.cs` | `ShutdownGateTests`（3） |
 | W35-02 | ID-30 | `Services/ServiceRegistry.cs`、`Loading/PluginLoader.cs` | `RebindAndReloadTests`（3） |
 | ID-30 | 09 §4；02 §3 | `Hosting/`、`Runtime/Plugins/` | W35-01~03 |
+| W36-01 | ID-31 | `Runtime/Plugins/Lifecycle/PluginRuntime.cs` | `DependencyTimeoutTests`（2） |
+| ID-31 | DC-5 | `Runtime/Plugins/Lifecycle/PluginRuntime.cs` | W36-01~02 |
 
 ## 9. 维护规则
 
