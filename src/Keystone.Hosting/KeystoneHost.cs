@@ -85,7 +85,12 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         // 4-5. 根 context（能力域 context 挂其下，03 §1）+ 能力域（01 §2 管理层职责，09 §2）
         // DC-11：根总线携带事实存储——插件 context（子链共享总线）的生命周期事实自动持久化
-        _rootContext = new ContextFacade("root", eventStore: _options.EventStore);
+        // DC-20：根 context 接 LoggerFactory + 域前缀（category = {域}/{插件 ID}，05 §5）
+        _rootContext = new ContextFacade(
+            "root",
+            loggerFactory: _options.LoggerFactory,
+            eventStore: _options.EventStore,
+            logCategoryPrefix: _options.EnableCapabilityDomain ? _options.CapabilityDomainName : null);
         if (_options.EnableCapabilityDomain)
         {
             _capabilityDomain = CapabilityDomain.Create(_options.CapabilityDomainName);

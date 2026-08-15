@@ -70,6 +70,7 @@ created: 2026-08-15
 | P40 文档达标 DC-10 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 管道 swap 原子替换（§7.40：实例化缓存 + SwapPipelineAsync + 保留 actor/context，269/269 全绿） | §7.40 |
 | P41 文档达标 DC-7 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 宿主分层叠加（§7.41：StartAsync 多层按序叠加 + 逐层插值，274/274 全绿）——P1 四项闭合 | §7.41 |
 | P42 文档达标 DC-16 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | disabled 挂起运行行为（§7.42：挂起不加载/父组继承/恢复 API，279/279 全绿；isolate 未接线记剩余） | §7.42 |
+| P43 文档达标 DC-20 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 日志 category 前缀 + 宿主 LoggerFactory（§7.43：{域}/{插件} 命名 + 子 context 继承，281/281 全绿；IOptions 命名选项记剩余） | §7.43 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -149,6 +150,7 @@ created: 2026-08-15
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 | ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
 | ID-33 | 2026-08-16 | P38 | 静态插值双层形态（DC-8，ADR-0012）：YAML 整值标量走 tag 形态（!!env NAME/!!file path，YamlDotNet TagName）；文本内容内引用走冒号前缀形态（!!env:NAME）；缺失保留标记（tag 形态重构为 `!!env NAME` 字符串，不静默替换）；环检测 visited 改展开栈语义（add→递归→remove，同文件多处引用非环） | ADR-0012 tag 机制保留（YamlDotNet 自定义 tag）；字符串中间嵌入标记不支持（ADR 示例均为整值）；原实现 visited 只增不减（误报环） | `src/Keystone.Config/Interpolation/StaticInterpolator.cs`、`Entries/EntryParser.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-8） |
+| ID-38 | 2026-08-16 | P43 | 日志命名接线形态（DC-20，05 §5）：ContextFacade 增 logCategoryPrefix（root 设 {能力域名}，子 context 构造继承——GetLogger 输出 {域}/{插件 ID}）+ loggerFactory 子 context 复用 root 工厂；KeystoneHostOptions.LoggerFactory 注入根 context（null = NullLogger 原行为） | 05 §5 category={能力域}/{插件 ID}；前缀经 context 链继承（对齐服务解析链形态）而非宿主逐插件传——插件 context 创建点（contextFactory）不变 | `src/Keystone.Runtime/Context/ContextFacade.cs`、`Hosting/KeystoneHostOptions.cs`、`KeystoneHost.cs` | 否（17-doc-compliance-audit DC-20） |
 | ID-37 | 2026-08-16 | P42 | disabled 挂起形态（DC-16，08 §3）：EnumerateActiveLeaves 过滤（自身或祖先 disabled=true 的叶子不参与加载/门控拓扑/manifest 校验——挂起条目 inject 引用放宽，恢复时经加载路径再校验）；`SetEntryDisabledAsync(id, bool)`——true=卸载（条目树保留，挂起不删），false/null=加载恢复（"改回即恢复"）；manifest 校验走 active 集（挂起依赖引用缺失不再阻断启动） | 08 §3 "挂起不删，改回即恢复；父组 disabled → 子树全部挂起（组自身永不挂起）"；挂起条目不是运行成员——其 inject 引用不应参与可达性 fail-fast（否则挂起一个依赖方就阻塞整树启动） | `src/Keystone.Hosting/KeystoneHost.cs` | 否（17-doc-compliance-audit DC-16） |
 | ID-36 | 2026-08-16 | P41 | 宿主分层叠加形态（DC-7，08 §4）：`StartAsync(IReadOnlyList<string>)` 多层重载——逐层独立解析（DC-8 插值按层展开）→ EntryTree.ApplyLayers 叠加（patch 按 id 合并/insert 插入/层内重复 fail-fast）；`StartAsync(string)` 转发单层（原语义零破坏）；空层列表 = ConfigValidationFailed | 08 §4 叠加以条目 id 为主键；patch 语义 = 替换整个 config（08 §4 原文"替换整个 config"）非逐 key 合并；环境选择 = 调用方选层（overlay 由嵌入方组装，框架不内置环境探测） | `src/Keystone.Hosting/KeystoneHost.cs` | 否（17-doc-compliance-audit DC-7） |
 | ID-35 | 2026-08-16 | P40 | 管道缓存 + swap 形态（DC-10，ADR-0003 决策 2）：CapabilityActor 构造时构建管道缓存（跨请求复用，无中间件=直通管道）；terminal 经 actor 级当前请求槽路由 handler（链缓存不绑定特定请求；actor 串行循环内无竞争）；SwapPipeline 消息 → 新链构建后 volatile 换引用（原子替换）；保留 actor/context，在途请求已捕获旧链（串行无半新半旧交错） | 04 §8"管道配置热更新=原子替换"；原实现每请求重建（terminal 捕获 envelope 所致）→ 槽路由解耦请求与链；CapabilityDomain.SwapPipelineAsync 公开面（Send 单向消息，无需响应） | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`SwapPipeline.cs`、`CapabilityDomain.cs` | 否（17-doc-compliance-audit DC-10） |
@@ -688,6 +690,16 @@ created: 2026-08-15
 | 2026-08-16 | W42-02 | `SetEntryDisabledAsync`：true 卸载（树保留）/false 加载恢复；挂起条目不 PENDING 占坑（不等待依赖） | 实现（TDD） | DC-16；ID-37 | 同上 | 同上 | ✅ |
 | 2026-08-16 | W42-03 | 全量回归 279/279 + Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.43 P43 文档达标 DC-20：日志 category 前缀 + 宿主 LoggerFactory
+
+> 17-doc-compliance-audit DC-20（部分）：category 无域前缀、宿主未接 loggerFactory。本次兑现命名规则 + 工厂接线；IOptions 命名选项级别覆盖记剩余。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-16 | W43-01 | ContextFacade：logCategoryPrefix（root 设域前缀，子 context 构造继承）+ loggerFactory 子 context 复用 root 工厂；GetLogger = {域}/{name} | 实现（TDD） | DC-20；05 §5；ID-38 | `src/Keystone.Runtime/Context/ContextFacade.cs` | `LoggingCategoryTests`（2） | ✅ |
+| 2026-08-16 | W43-02 | KeystoneHostOptions.LoggerFactory → 根 context（EnableCapabilityDomain=false 时无前缀）；null = NullLogger 原行为 | 实现（TDD） | DC-20；ID-38 | `Hosting/KeystoneHostOptions.cs`、`KeystoneHost.cs` | 同上（含回退用例） | ✅ |
+| 2026-08-16 | W43-03 | 全量回归 281/281 + Runtime/Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` × 2 | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -797,6 +809,8 @@ created: 2026-08-15
 | ID-36 | 08 §4；DC-7 | `Hosting/`（分层叠加） | W41-01~02 |
 | W42-01~02 | ID-37 | `Hosting/KeystoneHost.cs` | `DisabledEntryTests`（5） |
 | ID-37 | 08 §3；DC-16 | `Hosting/`（disabled 挂起） | W42-01~03 |
+| W43-01~02 | ID-38 | `Runtime/Context/ContextFacade.cs`、`Hosting/KeystoneHostOptions.cs`、`KeystoneHost.cs` | `LoggingCategoryTests`（2） |
+| ID-38 | 05 §5；DC-20 | `Runtime/Context/`、`Hosting/`（日志命名） | W43-01~03 |
 
 ## 9. 维护规则
 

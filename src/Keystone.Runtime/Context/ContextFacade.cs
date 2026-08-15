@@ -18,17 +18,24 @@ public sealed class ContextFacade : IPluginContext, IContext
     private readonly ILoggerFactory _loggerFactory;
     private readonly List<IContextInterceptor> _interceptors = [];
     private readonly HashSet<string> _ownedServices = new(StringComparer.Ordinal);
+    private readonly string? _logCategoryPrefix;
 
     public ContextFacade(
         string name,
         IContext? parent = null,
         ILoggerFactory? loggerFactory = null,
-        Keystone.Runtime.Persistence.IEventStore? eventStore = null)
+        Keystone.Runtime.Persistence.IEventStore? eventStore = null,
+        string? logCategoryPrefix = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         Name = name;
         Parent = parent;
-        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        // DC-20（05 §5 日志命名）：category = {能力域}/{插件 ID}——插件 context 继承 root 的域前缀
+        _logCategoryPrefix = logCategoryPrefix
+            ?? (parent as ContextFacade)?._logCategoryPrefix; // 子 context 继承（同一能力域）
+        _loggerFactory = loggerFactory
+            ?? (parent as ContextFacade)?._loggerFactory // 子 context 复用 root 的工厂
+            ?? NullLoggerFactory.Instance;
         // 事件总线在 context 链间共享（子复用父的实例，对齐 Cordis 单事件系统 + 监听 filter，ID-08）
         // DC-11：新建总线携带事实持久化存储（有父总线时以父总线的 store 为准）
         _events = parent?.Events is EventBus parentBus ? parentBus : new EventBus(eventStore);
@@ -152,7 +159,10 @@ public sealed class ContextFacade : IPluginContext, IContext
 
     // ── IContext：Effect / 日志 / 拦截器 ──
 
-    public ILogger GetLogger(string? name = null) => _loggerFactory.CreateLogger(name ?? Name);
+    /// <summary>命名日志（category：DC-20 = {域前缀}/{name}，无前缀 = name）。</summary>
+    public ILogger GetLogger(string? name = null)
+        => _loggerFactory.CreateLogger(
+            _logCategoryPrefix is { } prefix ? $"{prefix}/{name ?? Name}" : name ?? Name);
 
     public IDisposable Effect(Func<Task> disposer, string? label = null, [CallerMemberName] string? callerMember = null)
         => _effects.Register(disposer, label, callerMember);

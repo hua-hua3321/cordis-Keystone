@@ -50,6 +50,12 @@ public sealed class KeystoneHostOptions
     /// <summary>能力域名称（默认 "keystone"；多宿主嵌入场景可区分）。</summary>
     public string CapabilityDomainName { get; set; } = "keystone";
 
+    /// <summary>
+    /// 日志工厂（DC-20，05 §5）：注入根 context——插件 logger 経此可见（category = {能力域}/{插件 ID}）；
+    /// null（默认）= NullLogger（原行为）。可接 RingBufferLoggerProvider/Console/自定义 provider。
+    /// </summary>
+    public Microsoft.Extensions.Logging.ILoggerFactory? LoggerFactory { get; set; }
+
     /// <summary>全局关闭超时（09 §4 第 6 步：超时强制退出 + 记录未收敛插件；默认 30s）。</summary>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 }

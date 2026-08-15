@@ -9,7 +9,7 @@ created: 2026-08-15
 > 触发：用户指出"要根据文档里面的要求来做"，P33 暴露实现是文档的近似而非要求（如 01 §4 每实例持久 context 被简化为每请求新建）。
 > 方法：workflow 并行 5 子代理，逐项对照架构文档（00-16）与 ADR-0001~0015 的**可验证承诺** vs 当前实现。
 > 结果：30 项差距（5 域 × 6，全 ⚠️/❌），集中在"功能实现了但未按文档接线/语义简化"。
-> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 四项全部修复（DC-8 P38 / DC-11 P39 / DC-10 P40 / DC-7 P41）；P2 推进中：DC-16 ✅（P42）**；其余按 §4 计划排期。
+> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 四项全部修复（DC-8 P38 / DC-11 P39 / DC-10 P40 / DC-7 P41）；P2 推进中：DC-16 ✅（P42）/ DC-20 ✅（P43）**；其余按 §4 计划排期。
 
 ## 1. 审计方法
 
@@ -47,7 +47,7 @@ created: 2026-08-15
 | DC-17 | 10 §6、ADR-0008 | manifest configSchema + semver/白名单校验 | 缺 configSchema 字段，校验只做可达/无环 |
 | DC-18 | ADR-0009 决策3 | 事件分级/降级/归档/定时 Prune | StoredFact 无 Durable；Append 抛错不降级 |
 | DC-19 | ADR-0001 | IPluginSource/IPluginHost 抽象边界 | 无接口，SourceProvider 委托替代 |
-| DC-20 | 05 §5 | 日志 category={能力域}/{插件 ID} + IOptions 命名选项 | category 无域前缀；宿主未接 loggerFactory（NullLogger） |
+| DC-20 | 05 §5 | 日志 category={能力域}/{插件 ID} + IOptions 命名选项 | **⚠️ 部分（P43）**：category 前缀已兑现（root context 域前缀 + 子 context 继承 + LoggerFactory 经宿主选项注入）；IOptions 命名选项级别覆盖未接线（RingBuffer 三级过滤 G11/G12 已有，命名选项绑定记剩余） |
 
 ## 3. 根因分析
 
