@@ -65,10 +65,10 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 
 ## 加工件说明（看板流水线使用）
 
-当前阶段：**实现期完成（M0-M13 全部通过，231 测试全绿）+ P14 MCP 协议层落地 + P15-P20 解耦完成 + P21 集成验收 + P22 接入 B3/B4 + P23-P31 Cordis 差距 8 项全闭合（G-C1~C8：配置注入/依赖 re-arm/值注销/事件语义/延迟注入/waterfall/日志导出器/热更新）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
+当前阶段：**实现期完成（M0-M13 全部通过，236 测试全绿）+ P14 MCP 协议层落地 + P15-P20 解耦完成 + P21 集成验收 + P22 接入 B3/B4 + P23-P32 Cordis 差距 9 项闭合（G-C1~C8 + G-C11：配置注入/依赖 re-arm/值注销/事件语义/延迟注入/waterfall/日志导出器/热更新/级别阈值）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
 
 - 构建：`dotnet build cordis-csharp.slnx`（已存在；警告即错误）
-- 测试：`dotnet test cordis-csharp.slnx`（已存在；231 个单测绿，M0-M13 全阶段 + P14-P31）
+- 测试：`dotnet test cordis-csharp.slnx`（已存在；236 个单测绿，M0-M13 全阶段 + P14-P32）
 - **实现纪律（13 §6）**：TDD 测试先行（红→绿→重构）；设计模式 + 契约/错误/实现边界抽象隔离；跨层单向依赖
 - 文档校验：`cd ~/Projects/central-governance && python3 scripts/validate_frontmatter.py`
 - 设计文档改动必须同步：AGENTS.md 索引、docs/architecture/ 对应文档、decisions/ ADR
