@@ -64,6 +64,7 @@ created: 2026-08-15
 | P34 文档达标 DC-1 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 实例级持久 context（§7.34：01 §4 actor 持 context 兑现，238/238 全绿） | §7.34 |
 | P35 文档达标 DC-3/DC-6 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | quiesce 入口拒绝+超时审计 + rebind 报错+热重载顺序（§7.35，244/244 全绿） | §7.35 |
 | P36 文档达标 DC-5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 依赖超时接线（§7.36：依赖永不就绪→FAILED，246/246 全绿） | §7.36 |
+| P37 文档达标 DC-4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 监督策略（§7.37：OneForOne + 重启计数 + 超阈值停止，248/248 全绿） | §7.37 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -141,6 +142,7 @@ created: 2026-08-15
 | ID-29 | 2026-08-15 | P34 | 实例级持久 context（DC-1）：CapabilityActor 构造时创建实例 context（父 = parentContext 可选），跨请求复用；中间件/请求在实例 context 上执行 | 01 §3/§4"actor=context 同生命周期"兑现；此前每请求新建 context 状态丢失；父链接入插件服务解析 + 共享事件总线（03 §2） | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`CapabilityDomain.cs` | 否（17-doc-compliance-audit DC-1） |
 | ID-30 | 2026-08-15 | P35 | 文档达标 DC-3/DC-6：①全局 quiesce 补入口拒绝 + 总超时 + 未收敛审计（09 §4）；②rebind 重复注册报错 + 热重载先卸载再启动（02 §3/ADR-0007） | 兑现 09 §4 六步关闭语义与 rebind 语义；热重载顺序修复防同名注册冲突/误删 | `KeystoneHost`、`KeystoneHostOptions`、`ServiceRegistry`、`PluginLoader` | 否（17-doc-compliance-audit DC-3/DC-6） |
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
+| ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -611,6 +613,17 @@ created: 2026-08-15
 | 2026-08-15 | W36-01 | PluginRuntime：构造器增 dependencyTimeout（默认 KeystoneSettings.DependencyWaitTimeout 30s）；WaitForDependenciesAsync 加超时（超时抛 GatingDependencyTimeout）；AwaitDependenciesOrFailAsync 提取（超时 → FAILED + 错误可查） | 实现（TDD） | DC-5；ADR-0007 | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | `DependencyTimeoutTests`（2） | ✅ |
 | 2026-08-15 | W36-02 | 全量回归 246/246 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.37 P37 文档达标 DC-4：监督策略
+
+> 17-doc-compliance-audit DC-4（🔴）：Spawn 裸 props 无监督配置（05 §2/09 §3 承诺 OneForOne + 重启计数 + 超阈值升级不可用）。本次配 OneForOneStrategy（Restart decider + 窗口重试上限，超阈值停止不再重启）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W37-01 | `CapabilitySupervisionOptions`（MaxRestarts 默认 3 / RestartWindow 默认 5s）+ `CapabilityDomain.Spawn` 配 OneForOneStrategy（Restart decider，超阈值停止 = 域不可用升级） | 实现（TDD） | 05 §2；09 §3；DC-4 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | `SupervisionPolicyTests`（2） | ✅ |
+| 2026-08-15 | W37-02 | 全量回归 248/248 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
+> **P0 高危 5 项全部修复**：DC-1（P34）/ DC-3（P35）/ DC-6（P35）/ DC-5（P36）/ DC-4（P37）。
+
 > **审计发现**：30 项差距集中在"功能实现了但未按文档接线/语义简化"（quiesce 五步缺拒绝/排空、监督缺失、超时熔断死代码、分层叠加孤立、静态插值死代码、事件持久化孤立、管道无原子替换等）——见 17-doc-compliance-audit.md（待产出）。
 
 ## 8. 回溯索引（三向映射）
@@ -710,6 +723,8 @@ created: 2026-08-15
 | ID-30 | 09 §4；02 §3 | `Hosting/`、`Runtime/Plugins/` | W35-01~03 |
 | W36-01 | ID-31 | `Runtime/Plugins/Lifecycle/PluginRuntime.cs` | `DependencyTimeoutTests`（2） |
 | ID-31 | DC-5 | `Runtime/Plugins/Lifecycle/PluginRuntime.cs` | W36-01~02 |
+| W37-01 | ID-32 | `Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | `SupervisionPolicyTests`（2） |
+| ID-32 | 05 §2；09 §3 | `Actors/`（监督策略） | W37-01~02 |
 
 ## 9. 维护规则
 

@@ -50,17 +50,25 @@ public sealed class CapabilityDomain : IAsyncDisposable
     /// before/after/短路语义，ADR-0006 waterfall）。
     /// <paramref name="parentContext"/> = 实例 context 的父（01 §4：接入宿主 root 的服务链 + 共享事件总线；
     /// 缺省 null = 独立实例）。
+    /// <paramref name="supervision"/> = 监督策略（05 §2/09 §3，DC-4）：OneForOne（默认 Restart decider +
+    /// 3 次重试/5s 窗口，超阈值停止不再重启 = 域不可用）；可自定义。
     /// </summary>
     public CapabilityHandle Spawn(
         string instanceName,
         Func<TaskEnvelope, Task<TaskResultEnvelope>> handler,
         IReadOnlyList<IMiddleware>? middlewares = null,
-        Keystone.Runtime.Context.IContext? parentContext = null)
+        Keystone.Runtime.Context.IContext? parentContext = null,
+        CapabilitySupervisionOptions? supervision = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
         ArgumentNullException.ThrowIfNull(handler);
 
-        var props = Props.FromProducer(() => new CapabilityActor(instanceName, handler, middlewares, parentContext));
+        supervision ??= new CapabilitySupervisionOptions();
+        var props = Props.FromProducer(() => new CapabilityActor(instanceName, handler, middlewares, parentContext))
+            .WithGuardianSupervisorStrategy(new OneForOneStrategy(
+                decider: (_, _) => Proto.SupervisorDirective.Restart, // DC-4：崩溃重启（默认）
+                maxNrOfRetries: supervision.MaxRestarts,
+                withinTimeSpan: supervision.RestartWindow));
         var pid = _system.Root.SpawnNamed(props, $"{_name}-{instanceName}");
         return new CapabilityHandle(this, pid);
     }
