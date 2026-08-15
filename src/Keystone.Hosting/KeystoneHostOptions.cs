@@ -17,6 +17,18 @@ public sealed class KeystoneHostOptions
         _ => throw new InvalidOperationException("SourceProvider is not configured");
 
     /// <summary>
+    /// 获取端抽象（DC-19，ADR-0001 决策 2）：配置后插件源码经 <c>IPluginSource.FetchAsync</c>
+    /// 获取（本地文件/远程分发可替换，编译/ALC/dispose 管线不动）；优先于 SourceProvider 委托。
+    /// </summary>
+    public Keystone.Runtime.Plugins.Loading.IPluginSource? PluginSource { get; set; }
+
+    /// <summary>
+    /// 运行形态扩展点（DC-19，ADR-0001 决策 1）：**预留**——本期唯一形态同进程 ALC；
+    /// 独立进程隔离（方案 B）未来经此引入。
+    /// </summary>
+    public Keystone.Runtime.Plugins.Loading.IPluginHost? PluginHost { get; set; }
+
+    /// <summary>
     /// 条目 → 配置 schema（G-C1 配置注入，16-cordis-gap-review）：
     /// 返回 null = 该插件无 schema 声明，原始 config 直传（不校验）。
     /// 非 null = 经 ConfigResolver 校验（必填/未知字段 fail-fast）+ 默认值补齐后注入 InitializeAsync。

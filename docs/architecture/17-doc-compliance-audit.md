@@ -9,7 +9,7 @@ created: 2026-08-15
 > 触发：用户指出"要根据文档里面的要求来做"，P33 暴露实现是文档的近似而非要求（如 01 §4 每实例持久 context 被简化为每请求新建）。
 > 方法：workflow 并行 5 子代理，逐项对照架构文档（00-16）与 ADR-0001~0015 的**可验证承诺** vs 当前实现。
 > 结果：30 项差距（5 域 × 6，全 ⚠️/❌），集中在"功能实现了但未按文档接线/语义简化"。
-> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 四项全部修复（DC-8 P38 / DC-11 P39 / DC-10 P40 / DC-7 P41）；P2 推进中：DC-16 ✅（P42）/ DC-20 ✅（P43）/ DC-13 ✅（P44）/ DC-15 ✅（P45）/ DC-17 ✅（P46）/ DC-18 ✅（P47）**；其余按 §4 计划排期。
+> 状态：**🔴 P0 高危 5 项全部修复（DC-1 P34 / DC-3 P35 / DC-6 P35 / DC-5 P36 / DC-4 P37）；P1 四项全部修复（DC-8 P38 / DC-11 P39 / DC-10 P40 / DC-7 P41）；P2 推进中：DC-16 ✅（P42）/ DC-20 ✅（P43）/ DC-13 ✅（P44）/ DC-15 ✅（P45）/ DC-17 ✅（P46）/ DC-18 ✅（P47）/ DC-19 ✅（P48）**；其余按 §4 计划排期。
 
 ## 1. 审计方法
 
@@ -46,7 +46,7 @@ created: 2026-08-15
 | DC-16 | 08 §3 | disabled 挂起 + isolate 组级隔离 | **⚠️ 部分（P42）**：disabled 运行行为已兑现（挂起不加载/父组继承子树/SetEntryDisabledAsync 恢复/挂起条目不参与门控拓扑与 manifest 校验）；isolate 组级服务隔离未接线（3 §2.2 语义，后续项） |
 | DC-17 | 10 §6、ADR-0008 | manifest configSchema + semver/白名单校验 | **✅ 已修复（P46）**：PluginManifest.ConfigSchema 字段（可选，null=原始直传）；version 语义化版本校验（GeneratedRegex + NonBacktracking）；dependencies ⊆ 程序集编译白名单（越界 fail-fast，规则 0） | ✅ |
 | DC-18 | ADR-0009 决策3 | 事件分级/降级/归档/定时 Prune | **✅ 已修复（P47）**：StoredFact 增 Durable 字段（EventBus 落盘时携带，旧数据缺键=尽力写）；FileEventStore 增 archivePath（Prune 被清事实同帧格式归档可重放，未配置=纯删除）；FactRetentionScheduler 周期 Prune（失败降级续跑）+ 宿主 RetentionPolicy/PruneInterval 接线随宿主启停（降级语义 P39 EventBus 已先行） | ✅ |
-| DC-19 | ADR-0001 | IPluginSource/IPluginHost 抽象边界 | 无接口，SourceProvider 委托替代 |
+| DC-19 | ADR-0001 | IPluginSource/IPluginHost 抽象边界 | **✅ 已修复（P48）**：IPluginSource 获取端抽象（FetchAsync(manifest)，只替换获取不动编译/ALC/dispose 管线）+ LocalPluginSource 初始实现（根目录 + {id}/{main} 回退）；IPluginHost 运行形态扩展点（预留，DefaultPluginHost = same-process-alc 本期唯一形态）；宿主 PluginSource 选项优先于 SourceProvider 委托（向后兼容） | ✅ |
 | DC-20 | 05 §5 | 日志 category={能力域}/{插件 ID} + IOptions 命名选项 | **⚠️ 部分（P43）**：category 前缀已兑现（root context 域前缀 + 子 context 继承 + LoggerFactory 经宿主选项注入）；IOptions 命名选项级别覆盖未接线（RingBuffer 三级过滤 G11/G12 已有，命名选项绑定记剩余） |
 
 ## 3. 根因分析

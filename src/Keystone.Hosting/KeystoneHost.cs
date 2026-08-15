@@ -437,7 +437,9 @@ public sealed class KeystoneHost : IAsyncDisposable
     private async Task LoadEntryAsync(EntryOptions entry)
     {
         var manifest = _options.ManifestProvider(entry);
-        var source = _options.SourceProvider(entry);
+        var source = _options.PluginSource is { } pluginSource
+            ? await pluginSource.FetchAsync(manifest).ConfigureAwait(false) // DC-19：获取端抽象优先
+            : _options.SourceProvider(entry);
 
         // G-C1 配置注入（16-cordis-gap-review）：schema 校验 + 默认值补齐后传入插件。
         // 校验失败 → 该插件 FAILED（09 §2 隔离语义：插件失败不整域回滚），不阻断其他插件。
