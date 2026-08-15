@@ -45,6 +45,7 @@ created: 2026-08-15
 | P15 解耦审计 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 审计闭环（§7.15：C1-C8 清单 + 15-decoupling-plan 计划） | §7.15 |
 | P16 解耦 D1 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 能力域接线 + Proto 隔离（§7.16：C1/C1b/C2 闭合，200/200 全绿） | §7.16 |
 | P17 解耦 D3 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 序列化器抽象（§7.17：C6 闭合，IContractSerializer + JSON 注入，205/205 全绿） | §7.17 |
+| P18 解耦 D2 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 配置解析面收敛（§7.18：C3 闭合，EntryParser 零 YamlDotNet 泄漏，206/206 全绿） | §7.18 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -106,6 +107,7 @@ created: 2026-08-15
 | ID-13 | 2026-08-15 | P14 | MCP 桥**契约隔离**：公共面 = Keystone 协议中立契约（接口 + DTO + options，零 SDK 类型），SDK 类型全部内聚于实现内部做映射；传输所有权按官方源码落实（client 会话由 McpClient 释放、server 会话由桥释放） | 用户评审质疑"MAF 稳定后要改很多东西"→ 隔离面设计；公共签名无 SDK 类型由测试锁定（换实现调用方零改动） | `src/Keystone.AI/Mcp/`（契约 + 实现分层） | 否（ADR-0008 决策 4 备注 + 14 §7.14） |
 | ID-14 | 2026-08-15 | P16 | 能力域隔离形态（15-plan D1）：CapabilityDomain 构造器私有化 + `Create`（自有 ActorSystem）/`Attach`（注入测试缝）；`CapabilityHandle` 封装 PID 作框架句柄；CapabilityActor 降 internal；KeystoneHost 接线（EnableCapabilityDomain 默认开） | 调用方常规路径零 Proto 类型（隔离目标）；Attach 是显式共享 ActorSystem 高级场景（隔离测试豁免）；Create 模式拥有 system 由域释放、Attach 模式调用方管理 | `src/Keystone.Runtime/Actors/`、`src/Keystone.Hosting/` | 否（15-plan D1 备注） |
 | ID-15 | 2026-08-15 | P17 | 序列化器抽象（15-plan D3）：`IContractSerializer` + 默认 MessagePack + 可注入 JSON（STJ 源生成上下文）；应用到事件持久化（FileEventStore 构造器注入） | ADR-0004"JSON 可配置"兑现；跨域边界（Proto.Actor 引用传递）无实际序列化，`[MessagePackObject]` 契约声明保留；唯一消费点=事件持久化；AOT 安全（源生成，禁反射） | `src/Keystone.Core/Serialization/`、`src/Keystone.Runtime/Persistence/FileEventStore.cs` | 否（ADR-0004 备注 + 15-plan D3） |
+| ID-16 | 2026-08-15 | P18 | 配置解析面收敛（15-plan D2）：`EntryParser.NodeToObject` 降 private，YamlDotNet 类型退出公共面 | 无外部调用（仅内部递归）；Parse(string) 返回纯框架类型足够；隔离测试锁定 | `src/Keystone.Config/Entries/EntryParser.cs` | 否（15-plan D2） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -384,6 +386,15 @@ created: 2026-08-15
 | 2026-08-15 | W17-02 | FileEventStore 走抽象：构造器可选注入 `IContractSerializer`（默认 MessagePack，兼容现有调用）；4 处序列化点替换 | 重构（TDD） | ADR-0004/0009；ID-15 | `src/Keystone.Runtime/Persistence/FileEventStore.cs` | 现有 FileEventStoreTests 全绿 + 新增 JSON 注入往返 | ✅ |
 | 2026-08-15 | W17-03 | 全量回归 205/205 + Core/Runtime AOT 发布零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.18 P18 解耦 D2：配置解析面收敛（C3）
+
+> 15-decoupling-plan D2（P2）：EntryParser 公共面不再暴露 YamlDotNet 类型。`NodeToObject` 唯一 public 泄漏（Get/Scalar/Bool/StringList 已 private），无外部调用（仅内部递归）→ 降 private。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W18-01 | `EntryParser.NodeToObject` 降 private（YamlDotNet 类型退出公共面）；隔离测试：EntryParser 公共静态签名无 YamlDotNet 泄漏 | 重构（TDD） | 15-plan D2 | `src/Keystone.Config/Entries/EntryParser.cs`、`tests/Keystone.Config.Tests/EntryParserIsolationTests.cs` | 隔离测试绿 + 现有 EntryParserTests 全绿 | ✅ |
+| 2026-08-15 | W18-02 | 全量回归 206/206 | 验收 | — | — | `dotnet test` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -439,6 +450,8 @@ created: 2026-08-15
 | W17-01 | ID-15 | `Core/Serialization/`（接口 + 2 实现） | `ContractSerializerTests`（4） |
 | W17-02 | ID-15 | `Runtime/Persistence/FileEventStore.cs` | JSON 注入往返测试 |
 | ID-15 | ADR-0004 | `Core/Serialization/`、`Runtime/Persistence/` | W17-01~03 |
+| W18-01 | ID-16 | `Config/Entries/EntryParser.cs` | `EntryParserIsolationTests` |
+| ID-16 | 15-plan D2 | `Config/Entries/EntryParser.cs` | W18-01~02 |
 
 ## 9. 维护规则
 

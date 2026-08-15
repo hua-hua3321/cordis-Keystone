@@ -45,13 +45,10 @@ created: 2026-08-15
 - **目标**：`KeystoneHost` 按 01-overview 接线能力域；`CapabilityDomain`/`CapabilityActor` 公共面不再暴露 Proto.Actor 类型
 - **落地**（14 §7.16 / ID-14）：`CapabilityHandle` 封装 PID 作框架句柄；`CapabilityDomain` 构造器私有化 + `Create`（自有 ActorSystem）/`Attach`（注入测试缝，隔离测试豁免）；`CapabilityActor` 降 internal；`KeystoneHost` 增 `EnableCapabilityDomain`（默认开）+ `GetCapabilityDomain()`，StartAsync 创建 / ShutdownAsync 释放。200/200 全绿 + Runtime AOT 零 IL 警告。
 
-### 阶段 D2：配置解析面收敛（C3，🟡）
+### 阶段 D2：配置解析面收敛（C3，🟡）—— ✅ 已执行（P18，2026-08-15）
 
 - **目标**：`EntryParser` 公共面不再暴露 YamlDotNet 类型
-- **设计方向**：`NodeToObject`/`Get`/`Scalar`/`Bool`/`StringList` 降为 `private`/`internal`（当前无外部调用者，仅内部递归 + `Parse` 公共入口）；`Parse(string)` → `IReadOnlyList<EntryOptions>` 保持
-- **验收**：`EntryParser` 公共签名无 `YamlDotNet.*`；Config 测试全绿（现有测试全走 `Parse(string)`）
-- **决策通道**：无需（纯可见性收敛，无行为变化）
-- **风险**：极低
+- **落地**（14 §7.18 / ID-16）：`NodeToObject` 降 private（无外部调用，仅内部递归）；隔离测试锁定 EntryParser 公共静态签名无 YamlDotNet 泄漏。206/206 全绿。
 
 ### 阶段 D3：序列化器抽象（C6，🟡）—— ✅ 已执行（P17，2026-08-15）
 
@@ -91,7 +88,7 @@ created: 2026-08-15
 - [x] 独立复核子代理结果已合入（修正 C3、新增 C1b/C6b/C8）
 - [x] 阶段 D1 已执行（P16，14 §7.16/ID-14）
 - [x] 阶段 D3 已执行（P17，14 §7.17/ID-15）
-- [ ] 阶段 D2 开工（EntryParser 可见性收敛）
+- [x] 阶段 D2 已执行（P18，14 §7.18/ID-16）
 - [ ] 阶段 D4 开工（AI 层边界 + Workflows 死依赖）
 - [ ] 每阶段按 13 §6 纪律执行：测试先行 + 决策沉淀 + 文档同步
 

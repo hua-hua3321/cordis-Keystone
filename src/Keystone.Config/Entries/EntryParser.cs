@@ -32,7 +32,7 @@ public static class EntryParser
     }
 
     /// <summary>YAML 节点 → object 树（规则 0 手动转换；标量保持字符串形态，与 M.E.C 一致）。</summary>
-    public static object? NodeToObject(YamlNode? node)
+    private static object? NodeToObject(YamlNode? node)
     {
         switch (node)
         {
