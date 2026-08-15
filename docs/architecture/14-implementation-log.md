@@ -73,6 +73,7 @@ created: 2026-08-15
 | P43 文档达标 DC-20 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | 日志 category 前缀 + 宿主 LoggerFactory（§7.43：{域}/{插件} 命名 + 子 context 继承，281/281 全绿；IOptions 命名选项记剩余） | §7.43 |
 | P44 文档达标 DC-13 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | Trace 接入 + 幂等去重（§7.44：Activity 贯穿调用链 + TaskId 结果缓存，284/284 全绿） | §7.44 |
 | P45 文档达标 DC-15 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | CRUD 落盘写回 + position（§7.45：ConfigFilePath 防抖写回 + 冲刷/排空 + Serialize 索引重载死代码修复，291/291 全绿） | §7.45 |
+| P46 文档达标 DC-17 | ✔ 验证通过 | 2026-08-16 | 2026-08-16 | — | manifest configSchema + semver/白名单（§7.46：ConfigSchema 字段 + GeneratedRegex 校验 + 编译白名单，311/311 全绿） | §7.46 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -152,6 +153,7 @@ created: 2026-08-15
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 | ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
 | ID-33 | 2026-08-16 | P38 | 静态插值双层形态（DC-8，ADR-0012）：YAML 整值标量走 tag 形态（!!env NAME/!!file path，YamlDotNet TagName）；文本内容内引用走冒号前缀形态（!!env:NAME）；缺失保留标记（tag 形态重构为 `!!env NAME` 字符串，不静默替换）；环检测 visited 改展开栈语义（add→递归→remove，同文件多处引用非环） | ADR-0012 tag 机制保留（YamlDotNet 自定义 tag）；字符串中间嵌入标记不支持（ADR 示例均为整值）；原实现 visited 只增不减（误报环） | `src/Keystone.Config/Interpolation/StaticInterpolator.cs`、`Entries/EntryParser.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-8） |
+| ID-42 | 2026-08-16 | P46 | manifest 校验扩展（DC-17，10 §6）：PluginManifest 增 ConfigSchema 可选参数（null = 无 schema 声明，G-C1 原始直传语义不变）；ManifestSchemaValidator 增两项——version 语义化版本（semver 2.0 形态：MAJOR.MINOR.PATCH[-prerelease][+build]，GeneratedRegex + NonBacktracking 防 ReDoS，MA0009/MA0023 合规）、dependencies ⊆ AssemblyWhitelist 公共集合（cordis-runtime/contracts + Keystone.* + M.E.Logging.Abstractions；越界精确报错——规则 0：System.Reflection.Emit 等宿主禁用依赖在编译期拦截） | 10 §6 "version 必填，语义化版本"+"程序集编译白名单"；白名单做公共静态集合（嵌入方可审查/扩展面）；semver 用 NonBacktracking（AOT 安全 + 线性时间） | `src/Keystone.Runtime/Plugins/Manifest/PluginManifest.cs`、`src/Keystone.Sdk/Manifest/ManifestSchemaValidator.cs` | 否（17-doc-compliance-audit DC-17） |
 | ID-40 | 2026-08-16 | P45 | CRUD 落盘形态（DC-15，09 §5/08 §6.3）：`KeystoneHostOptions.ConfigFilePath` → 惰性 ConfigFileWriter；全部变更点（Create/Remove/Move/SetEntryDisabled/UpdatePlugin-apply 成功后）ScheduleWriteBack（NotifyConfigUpdate 前置 F9 + 防抖快照 DumpConfig）；`FlushConfigAsync` 冲刷 + Shutdown 排空（写失败不阻断关闭，08 §6.3 readonly 报错不崩溃）+ Dispose 释放；CreateEntry/MoveEntry 增 position（根/组内 Insert 指定下标，越界回退追加） | position 语义 = 插入下标（09 §5 "含插入位置"）；写回经防抖（多次变更合并一次写）；UpdatePlugin 经 PatchContext 瀑布——否决不落盘 | `src/Keystone.Hosting/KeystoneHost.cs`、`KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-15） |
 | ID-41 | 2026-08-16 | P45 | **死代码 bug 修复**：`EntrySerializer.Serialize` 的 `entries.Select(SerializeEntry)` 方法组绑定 `Enumerable.Select` 的 `(TSource, Func<TSource,int,TResult>)` 索引重载——`SerializeEntry(entry, int indent = 0)` 的可选参数被喂元素下标：第 N 条目缩进 N 空格，≥2 条目写回即损坏。改为显式 lambda `e => SerializeEntry(e)` | DC-15 "ConfigFileWriter 死代码"审计的真实代价实证：零调用路径 bug 从未被测试暴露——接线时立即现形；回归测试固化（IndexRegressionTests 断言无 " - id" 缩进泄漏） | `src/Keystone.Config/Persistence/EntrySerializer.cs` | 否（随 P45） |
 | ID-39 | 2026-08-16 | P44 | Trace/幂等接线形态（DC-13，06 §3-§4）：ExecuteTracedAsync 包裹 TraceContext.StartTask（TaskId/ParentTaskId/能力域/操作 tag；finally Dispose 恢复前序 Activity——请求结束不残留）；幂等缓存 = actor 内 Dictionary<Guid, TaskResultEnvelope> + Queue FIFO（容量 1024 防无界）；缓存命中直接回结果——**不重执行、不重发事实**（事实已随首执行记录） | 06 §4 "TaskId 即幂等键，重试不得重复执行副作用"；缓存放 actor 实例级（每实例独立能力域请求面；跨实例幂等属编排层职责）；Activity 生命周期 = 单请求（结束即恢复，长命 actor 不持跨请求 trace） | `src/Keystone.Runtime/Actors/CapabilityActor.cs` | 否（17-doc-compliance-audit DC-13） |
@@ -726,6 +728,17 @@ created: 2026-08-15
 | 2026-08-16 | W45-03 | **死代码修复**：Serialize 方法组索引重载 bug（第 N 条目缩进 N 空格）+ 回归测试 | 修复（TDD） | ID-41 | `src/Keystone.Config/Persistence/EntrySerializer.cs` | `EntrySerializerIndexRegressionTests`（1） | ✅ |
 | 2026-08-16 | W45-04 | 全量回归 291/291 + Config/Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` × 2 | ✅ |
 
+### 7.46 P46 文档达标 DC-17：manifest configSchema + semver/白名单校验
+
+> 17-doc-compliance-audit DC-17（❌→✅）：缺 configSchema 字段、version 只查非空、依赖无白名单。本次补齐 manifest schema 三缺口。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-16 | W46-01 | PluginManifest.ConfigSchema 可选参数（null = 无声明原始直传，G-C1 语义不变） | 实现（TDD） | DC-17；10 §6；ID-42 | `src/Keystone.Runtime/Plugins/Manifest/PluginManifest.cs` | `Config_schema_is_optional_and_preserved` | ✅ |
+| 2026-08-16 | W46-02 | version 语义化版本校验（GeneratedRegex NonBacktracking：semver 含预发布/构建元数据形态） | 实现（TDD） | DC-17；ID-42 | `src/Keystone.Sdk/Manifest/ManifestSchemaValidator.cs` | `Semantic_versions_pass`（6）+ `Non_semantic_versions_fail_fast`（5） | ✅ |
+| 2026-08-16 | W46-03 | dependencies 编译白名单（公共 AssemblyWhitelist 集合；越界精确报错 fail-fast） | 实现（TDD） | DC-17；规则 0；ID-42 | 同上 | `Whitelisted_dependencies_pass`（6）+ `Non_whitelisted_dependency_fails_fast` | ✅ |
+| 2026-08-16 | W46-04 | 全量回归 311/311 + Sdk AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -842,6 +855,8 @@ created: 2026-08-15
 | W45-01~03 | ID-40/41 | `Hosting/KeystoneHost.cs`、`KeystoneHostOptions.cs`、`Config/Persistence/EntrySerializer.cs` | `CrudPersistenceTests`（6）+ `EntrySerializerIndexRegressionTests`（1） |
 | ID-40 | 09 §5；08 §6.3；DC-15 | `Hosting/`（写回管线）、`Config/Persistence/` | W45-01~04 |
 | ID-41 | DC-15 死代码实证 | `Config/Persistence/EntrySerializer.cs` | W45-03 |
+| W46-01~03 | ID-42 | `Runtime/Plugins/Manifest/PluginManifest.cs`、`Sdk/Manifest/ManifestSchemaValidator.cs` | `ManifestSchemaFieldTests`（18） |
+| ID-42 | 10 §6；DC-17 | `Runtime/Plugins/Manifest/`、`Sdk/Manifest/` | W46-01~04 |
 
 ## 9. 维护规则
 
