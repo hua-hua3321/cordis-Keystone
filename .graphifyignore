@@ -1,0 +1,85 @@
+# .graphifyignore — graphify 知识图谱扫描排除规则
+# 每行一个 glob 模式，# 开头为注释
+# 目录规则以 / 结尾
+# ! 开头为白名单例外
+#
+# 用法：将此文件放入项目根目录，graphify 会自动读取
+# 覆盖范围：所有项目通用排除 + 语言特定排除
+
+# ═══════════════════════════════════════════
+# 通用排除（所有项目）
+# ═══════════════════════════════════════════
+
+# Git
+.git/
+
+# 编辑器/IDE 临时文件
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.user
+*.vs/
+
+# 系统临时文件
+*.bak
+*.tmp
+*.log
+*.cache
+
+# ═══════════════════════════════════════════
+# 语言/框架特定排除（按需保留）
+# ═══════════════════════════════════════════
+
+# ── .NET / C# ──
+bin/
+obj/
+packages/
+*.nupkg
+*.vsix
+*.snupkg
+.nuget/
+
+# ── Node / TypeScript / JavaScript ──
+node_modules/
+dist/
+build/
+.cache/
+.next/
+.nuxt/
+out/
+coverage/
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Go ──
+vendor/
+
+# ── Rust ──
+target/
+
+# ── Docker ──
+.docker/
+
+# ── 运行产物 ──
+logs/
+output/
+tmp/
+temp/
+resources/
+artifacts/
+coverage/

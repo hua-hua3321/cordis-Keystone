@@ -1,0 +1,11 @@
+{
+  "//": "钩子配置（按语言 dotnet 自动生成），编辑后运行 hooks/install.sh 重新安装",
+  "pre-commit": [
+    "doc-governance",
+    "validate-frontmatter",
+    "dotnet-build"
+  ],
+  "commit-msg": [],
+  "post-commit": [],
+  "pre-push": []
+}
