@@ -5,7 +5,8 @@ namespace Keystone.Runtime.Logging;
 
 /// <summary>
 /// 环形缓冲日志 provider（L1）：内存环形 1000 条 + 诊断快照可读。
-/// 类别级别覆盖（G12）：overrides 字典（category → 最低级别）。
+/// 级别过滤（G12 + G-C11）：三级阈值——按 category 覆盖 → defaultLevel → 全局默认 Information
+/// （对齐 Cordis levels[name] ?? levels.default ?? INFO，logger.ts:155）。
 /// </summary>
 public sealed class RingBufferLoggerProvider : ILoggerProvider
 {
@@ -13,16 +14,19 @@ public sealed class RingBufferLoggerProvider : ILoggerProvider
     private readonly int _capacity;
     private readonly IReadOnlyDictionary<string, LogLevel> _overrides;
     private readonly IReadOnlyList<ILogSink> _sinks;
+    private readonly LogLevel? _defaultLevel;
 
     public RingBufferLoggerProvider(
         int capacity = 1000,
         IReadOnlyDictionary<string, LogLevel>? overrides = null,
-        IReadOnlyList<ILogSink>? sinks = null)
+        IReadOnlyList<ILogSink>? sinks = null,
+        LogLevel? defaultLevel = null)
     {
         _capacity = capacity;
         _buffer = new ConcurrentQueue<LogRecord>();
         _overrides = overrides ?? new Dictionary<string, LogLevel>(StringComparer.Ordinal);
         _sinks = sinks ?? []; // G-C7：sink 可注入（Console 默认由宿主接线，05 §5）
+        _defaultLevel = defaultLevel; // G-C11：default 兜底（null = 全局默认 Information）
     }
 
     public ILogger CreateLogger(string categoryName) => new RingLogger(this, categoryName);
@@ -46,8 +50,17 @@ public sealed class RingBufferLoggerProvider : ILoggerProvider
         }
     }
 
+    /// <summary>
+    /// G-C11 三级级别过滤（对齐 Cordis levels[name] ?? levels.default ?? INFO）：
+    /// 按 category 覆盖 → defaultLevel → 全局默认 Information。
+    /// </summary>
     internal bool IsEnabled(string categoryName, LogLevel level)
-        => _overrides.TryGetValue(categoryName, out var min) ? level >= min : true;
+    {
+        var min = _overrides.TryGetValue(categoryName, out var overrideLevel)
+            ? overrideLevel
+            : _defaultLevel ?? LogLevel.Information;
+        return level >= min;
+    }
 
     public void Dispose()
     {

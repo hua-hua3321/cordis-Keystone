@@ -9,7 +9,7 @@ created: 2026-08-15
 > 对照 vendored Cordis 源码（`~/Projects/deepseek-harness/vendor/cordis/src/`，9 模块 2693 行）与 Keystone **当前实现**（M0-M13 + P14-P22，209 测试）的差距复核。
 > 07-cordis-migration-gap 是**设计期**差距分析（0 覆盖/7 部分/0 未覆盖）；本文是**实现后**复核——验证设计期映射是否真正落地，找出仍缺的实现缺口。
 > 方法：4 个独立子代理并行审计（Events/Registry+Service/Reflect+Context/Logger+Utils）+ 主代理独立验证关键点。
-> 执行状态：**🔴 3 高危 + 🟡 5 中危已全部闭合（P24-P31，见 14-implementation-log §7.24-7.31）**；🟢 低危记录保持。
+> 执行状态：**🔴 3 高危 + 🟡 5 中危 + 🟢 G-C11 已全部闭合（P24-P32，见 14-implementation-log §7.24-7.32）**；🟢 G-C9/C10/C12/C13/C14 记录保持（设计取向/已决策丢弃/等价物存在）。
 
 ## 1. 综合差距清单（按严重度）
 
@@ -37,7 +37,7 @@ created: 2026-08-15
 |---|------|------|
 | G-C9 | 事件 internal/* 拦截事件缺失 | Cordis 的 internal/listener、dispatch、update、config 总线事件无对应物（以 .NET 事件/拦截器替代）——设计取向差异，记录 |
 | G-C10 | 监听器拿不到发布 context | Cordis this=ctx + 自定义 filter；Keystone handler 仅收 TEvent（scope 作过滤基准）——C# 无 this 概念，可接受 |
-| G-C11 | 日志级别过滤无全局默认 | Cordis 默认 INFO 三级阈值；Keystone `IsEnabled` 无 override 恒 true——小幅语义差 |
+| G-C11 | 日志级别过滤无全局默认 | Cordis 默认 INFO 三级阈值；Keystone `IsEnabled` 无 override 恒 true | ~~小幅语义差~~ **✅ 已闭合（P32）**：三级过滤（override → defaultLevel → Information）对齐 Cordis levels 语义 | Debug 默认被过滤 |
 | G-C12 | ANSI 彩色输出缺失 | 文档判"无需对应"（L8），但连默认 Console sink 都无——与 G-C7 合并处理 |
 | G-C13 | accessor/mixin 缺失 | G16 已接受丢弃（10-plugin-sdk §8）——无差距 |
 | G-C14 | composeError 堆栈增强 | L5 显式弃用（.NET 原生 async 栈更好）——无差距 |
@@ -74,8 +74,8 @@ created: 2026-08-15
 ## 5. 结论
 
 - **核心骨架已等价覆盖**：生命周期状态机、quiesce、五分发事件、服务门控、Effect、Trace、配置层、加载层——设计期"7 项部分覆盖"的**主语义**均已落地
-- **真实差距 8 项**（3 高 + 5 中）：**🔴 3 高危 + 🟡 5 中危已全部闭合（P24-P31）**——配置注入（G-C1）、依赖 re-arm（G-C2）、值注销（G-C3）、事件 false 语义（G-C4）、M4 延迟注入（G-C5）、waterfall terminal（G-C6）、日志导出器（G-C7）、热更新 API（G-C8）；🟢 低危记录保持
-- **根因**：M3/P3 阶段的"功能独立测试通过"未做宿主级接线验收；事件语义映射停留在文档层未逐条对照源码——已通过 P24-P31 逐项补齐
+- **真实差距 8 项**（3 高 + 5 中）+ G-C11 低危：**已全部闭合（P24-P32）**——配置注入（G-C1）、依赖 re-arm（G-C2）、值注销（G-C3）、事件 false 语义（G-C4）、M4 延迟注入（G-C5）、waterfall terminal（G-C6）、日志导出器（G-C7）、热更新 API（G-C8）、级别默认阈值（G-C11）；🟢 G-C9/C10/C12/C13/C14 记录保持
+- **根因**：M3/P3 阶段的"功能独立测试通过"未做宿主级接线验收；事件语义映射停留在文档层未逐条对照源码——已通过 P24-P32 逐项补齐
 
 ## 关联
 

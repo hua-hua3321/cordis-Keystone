@@ -59,6 +59,7 @@ created: 2026-08-15
 | P29 差距 G-C5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | M4 方法级延迟注入（§7.29：GetLazy 首次访问解析，224/224 全绿） | §7.29 |
 | P30 差距 G-C7 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 日志导出器抽象（§7.30：ILogSink + Console sink，228/228 全绿） | §7.30 |
 | P31 差距 G-C8 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 热更新 API（§7.31：ReloadPlugin/UpdatePlugin，231/231 全绿） | §7.31 |
+| P32 差距 G-C11 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 日志级别默认阈值（§7.32：三级过滤对齐 Cordis levels，236/236 全绿） | §7.32 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -132,6 +133,7 @@ created: 2026-08-15
 | ID-25 | 2026-08-15 | P29 | M4 方法级延迟注入（G-C5）：`IPluginContext.GetLazy<T>` 返回 `Lazy<Task<T>>`——首次访问 .Value 才解析（服务不可用抛 GatingServiceNotFound）；Lazy 缓存（只解析一次） | 兑现 12 文档 M4 声称的 Lazy 对应物；对齐 Cordis @Inject 方法级（registry.ts:45-59）：初始化声明、方法执行时解析 | `src/Keystone.Runtime/Context/IPluginContext.cs`、`ContextFacade.cs` | 否（16-cordis-gap-review G-C5 备注） |
 | ID-26 | 2026-08-15 | P30 | 日志导出器抽象（G-C7）：`ILogSink`（Write(LogRecord)，对齐 Cordis Exporter）+ `ConsoleLogSink`（结构化行 + 可选 ANSI 配色）；RingBufferLoggerProvider sinks 注入 + 分发 | 兑现 05 §5 "Console（默认）+ 可选 File/exporter"承诺；日志从内存快照变为可输出 | `src/Keystone.Runtime/Logging/`（ILogSink/ConsoleLogSink/RingBufferLoggerProvider） | 否（16-cordis-gap-review G-C7 备注） |
 | ID-27 | 2026-08-15 | P31 | 热更新 API（G-C8）：`ReloadPluginAsync`（冷重启：重编译 + 新 ALC）+ `UpdatePluginAsync`（热更新：config 变 → PatchContext 瀑布可否决 → 重载）；FileSystemWatcher 由嵌入方经 ConfigUpdate 事件接线 | 兑现 09 §5 ReloadPlugin/UpdatePlugin + 08 §6.1 变更分级；宿主用 YAML 字符串启动无文件源，watcher 不内置 | `src/Keystone.Hosting/KeystoneHost.cs` | 否（16-cordis-gap-review G-C8 备注） |
+| ID-28 | 2026-08-15 | P32 | 日志级别默认阈值（G-C11）：RingBufferLoggerProvider 三级过滤——按 category 覆盖 → defaultLevel → 全局默认 Information；IsEnabled 无 override 不再恒 true | 对齐 Cordis levels[name] ?? levels.default ?? INFO（logger.ts:155）；Debug 日志默认被过滤（真实语义缺陷修复） | `src/Keystone.Runtime/Logging/RingBufferLoggerProvider.cs` | 否（16-cordis-gap-review G-C11 备注） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -555,6 +557,15 @@ created: 2026-08-15
 | 2026-08-15 | W31-02 | `UpdatePluginAsync(id, config)`：更新条目 config → PatchContext 瀑布（可否决）→ 重载（08 §6.1 热更新分级 + ADR-0005） | 实现（TDD） | G-C8；ADR-0005 决策 3 | 同上 | `HotReloadTests.UpdatePlugin_*`（2） | ✅ |
 | 2026-08-15 | W31-03 | 全量回归 231/231 + Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.32 P32 差距 G-C11：日志级别默认阈值
+
+> 16-cordis-gap-review G-C11（🟢 低危但真实语义缺陷）：IsEnabled 无 override 恒 true（Debug 也输出）。本次三级过滤——按 category 覆盖 → defaultLevel → 全局默认 Information（对齐 Cordis levels[name] ?? levels.default ?? INFO）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W32-01 | RingBufferLoggerProvider 三级级别过滤：`defaultLevel` 参数 + IsEnabled 判定（override → defaultLevel → Information） | 实现（TDD） | G-C11；logger.ts:155 | `src/Keystone.Runtime/Logging/RingBufferLoggerProvider.cs` | `LogLevelThresholdTests`（5） | ✅ |
+| 2026-08-15 | W32-02 | 全量回归 236/236 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -641,6 +652,8 @@ created: 2026-08-15
 | ID-26 | G-C7 | `Logging/`（sink 抽象） | W30-01~03 |
 | W31-01~02 | ID-27 | `Keystone.Hosting/KeystoneHost.cs` | `HotReloadTests`（3） |
 | ID-27 | G-C8 | `Keystone.Hosting/KeystoneHost.cs` | W31-01~03 |
+| W32-01 | ID-28 | `Logging/RingBufferLoggerProvider.cs` | `LogLevelThresholdTests`（5） |
+| ID-28 | G-C11 | `Logging/`（级别过滤） | W32-01~02 |
 
 ## 9. 维护规则
 
