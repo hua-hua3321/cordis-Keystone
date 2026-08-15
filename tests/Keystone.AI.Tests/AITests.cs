@@ -27,6 +27,17 @@ public class ArchitectureTests
 
         Assert.Empty(mafRefs);
     }
+
+    [Theory]
+    [MemberData(nameof(CoreAssemblies))]
+    public void Core_assemblies_do_not_reference_MCP_SDK(Assembly assembly)
+    {
+        // 单向依赖延伸（ADR-0008 决策 4 落地）：MCP 协议 SDK 同样只允许出现在 Keystone.AI 组合层
+        var referenced = assembly.GetReferencedAssemblies().Select(a => a.Name);
+        var mcpRefs = referenced.Where(n => n?.StartsWith("ModelContextProtocol", StringComparison.Ordinal) == true).ToList();
+
+        Assert.Empty(mcpRefs);
+    }
 }
 
 public class WorkflowBridgeTests

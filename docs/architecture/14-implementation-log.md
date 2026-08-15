@@ -41,6 +41,7 @@ created: 2026-08-15
 | P11 插件 SDK | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | M11 | 4/4 验收全绿（§6.11） | §7.11 |
 | P12 AI 组合 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | M12 | 3/3 验收全绿（§6.12） | §7.12 |
 | P13 验收闭环 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | M13 | 4/4 验收全绿（§6.13） | §7.13 |
+| P14 MCP 协议层 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 6/6 验收全绿（§7.14；ADR-0008 决策 4 延迟项落地） | §7.14 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -98,6 +99,7 @@ created: 2026-08-15
 | ID-09 | 2026-08-15 | P3 | 依赖消失 → 依赖方走完整卸载闸门（事件驱动 fire-and-forget，状态可轮询断言） | ADR-0007 决策 3：服务提供方卸载 → 依赖方 reload/unload | Plugins/Lifecycle/PluginRuntime.cs | 否 |
 | ID-10 | 2026-08-15 | P3 | manifest 校验 Kahn 拓扑排序（入度 = 前置依赖数）检测环 + inject 可达性 fail-fast | ADR-0007 决策 2 影响：启动期校验器 | Plugins/Manifest/ManifestValidator.cs | 否 |
 | ID-11 | 2026-08-15 | P8 | F10 跨 realm 服务转移优化**不实现** | 多实例隔离靠解析侧独立 context 天然达成（每实例 scope 独立）；转移是性能优化非语义必需，实现成本/收益比不划算 | 03 §2.2；Actors/ | 否 |
+| ID-12 | 2026-08-15 | P14 | MCP 协议层落地选型：MAF Mcp 无稳定版 → 协议层组合官方稳定 SDK `ModelContextProtocol.Core` 2.2.0 实现双端；agent 集成层（typed AIFunction 进 MAF workflow）待 `Microsoft.Agents.AI.Mcp` 稳定后接入 | ADR-0008 决策 4 方向不变（组合官方 MCP 不自研）；协议 SDK 稳定（net10.0 原生、AOT 友好、M.E.AI 同源）；避免 alpha 依赖锁死 | `src/Keystone.AI/Mcp/`（McpClientBridge/McpServerBridge）；仅 Keystone.AI 引用 | 否（ADR-0008 决策 4 备注 + 11-gap 追踪） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -330,6 +332,19 @@ created: 2026-08-15
 | 2026-08-15 | W13-04 | 性能冒烟基线：插件加载/卸载循环、事件 emit 10000 条、管道调用 10000 次（宽松阈值内） | 测试 | 13 P13 验收 3 | `PerformanceSmokeTests` | 3 基线测试绿 | ✅ |
 | 2026-08-15 | W13-05 | 发布文档：README/AGENTS 状态 → 实现期完成 + 1.0 可运行声明 | 文档 | — | `README.md`、`AGENTS.md` | frontmatter 校验 | ✅ |
 
+### 7.14 P14 MCP 协议层落地（ADR-0008 决策 4 延迟项）
+
+> 背景：决策 4 原组合 `Microsoft.Agents.AI.Mcp`，但该包**至今无稳定版**（11 个版本全 alpha，最新 1.17.0-alpha.260804.1）。经 NuGet 核实，微软官方 **MCP 协议 SDK `ModelContextProtocol` 已有稳定版 2.2.0**（net10.0 原生支持，`ModelContextProtocol.Core` 含 client/server/协议核心/传输，主包仅 ASP.NET hosting 扩展）。用户批准路径 3：协议层用稳定 SDK 落地双端，agent 集成层待 MAF 稳定后接入。**方向不变（组合官方 MCP，不自研），实现层替换**。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W14-01 | CPM 引入 `ModelContextProtocol.Core` 2.2.0（仅 Keystone.AI 引用） | 实现 | ADR-0008 决策 4；ID-12 | `Directory.Packages.props`、`Keystone.AI.csproj` | restore 绿；版本解析无冲突（M.E.AI.Abstractions 10.8.3 满足 MAF ≥10.7.0 与 MCP ≥10.8.3） | ✅ |
+| 2026-08-15 | W14-02 | McpClientBridge：连接/枚举工具/调用工具/ping（薄封装 McpClient，传输注入，不重造协议） | 实现（TDD） | ADR-0008 决策 4；ID-12 | `src/Keystone.AI/Mcp/McpClientBridge.cs` | `McpBridgeTests`（3） | ✅ |
+| 2026-08-15 | W14-03 | McpServerBridge：工具注册/会话运行（薄封装 McpServer，ToolCollection 惰性初始化） | 实现（TDD） | ADR-0008 决策 4；ID-12 | `src/Keystone.AI/Mcp/McpServerBridge.cs` | `McpBridgeTests`（3） | ✅ |
+| 2026-08-15 | W14-04 | in-process 双端测试：Pipe 内存流对接 StreamServerTransport/StreamClientTransport（无外部进程/网络） | 测试（TDD） | ADR-0008 决策 4 | `tests/Keystone.AI.Tests/McpBridgeTests.cs` | 3 用例绿（discover+call/多工具枚举/旧协议 ping） | ✅ |
+| 2026-08-15 | W14-05 | 架构测试扩展：核心 5 程序集不引用 `ModelContextProtocol*`（单向依赖延伸） | 测试 | ADR-0008 决策 1/4 | `tests/Keystone.AI.Tests/AITests.cs` | 5 程序集断言空 | ✅ |
+| 2026-08-15 | W14-06 | 全量回归 195/195 + Keystone.AI AOT 发布冒烟（ModelContextProtocol.Core 源生成 JSON，零 IL 警告） | 验收 | 规则 0；ADR-0008 组合包 AOT 验收门 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -369,6 +384,12 @@ created: 2026-08-15
 | ID-04 | 06 §1 | `Contracts/TaskId.cs` | W1-01 |
 | ID-05 | 12 §8 M6 | `Errors/ErrorCode.cs` | W1-04 |
 | ID-02 | 用户决策 | 全仓命名空间/包名 | W0-05 |
+| W14-01 | ADR-0008 决策 4；ID-12 | `Directory.Packages.props`、`Keystone.AI.csproj` | restore 绿 |
+| W14-02 | ID-12 | `AI/Mcp/McpClientBridge.cs` | `McpBridgeTests`（3） |
+| W14-03 | ID-12 | `AI/Mcp/McpServerBridge.cs` | `McpBridgeTests`（3） |
+| W14-04 | ADR-0008 决策 4 | `tests/Keystone.AI.Tests/McpBridgeTests.cs` | 3 用例绿 |
+| W14-05 | ADR-0008 决策 1/4 | `tests/Keystone.AI.Tests/AITests.cs` | 5 程序集断言空 |
+| ID-12 | ADR-0008 决策 4 | `AI/Mcp/`（双端桥） | W14-01~06 |
 
 ## 9. 维护规则
 

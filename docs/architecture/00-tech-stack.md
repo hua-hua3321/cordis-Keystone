@@ -31,7 +31,7 @@ created: 2026-08-15
 | T7 | Source Generator | C# 编译器内置（Roslyn） | AOT 就绪：序列化契约（MessagePack/System.Text.Json 源生成器）、编译期已知类型替代运行时反射 | AGENTS.md 规则 0、ADR-0002 |
 | T8 | ASP.NET Core 中间件形状 | 设计模式（不引包） | 管道：中间件链 + waterfall 语义，插件 = 中间件；不重造中间件框架 | 04-pipeline、01-overview §1 |
 | T9 | 中央治理库 | ~/Projects/central-governance（D01-D08 + R00-R20） | 项目规则引用：C# 代码风格/测试/文档治理等 | AGENTS.md 治理节 |
-| T10 | MAF 包族（Microsoft.Agents.AI.*） | 待锁定（跟随官方 NuGet，单向依赖） | AI 能力域底层组合：llm/agents/skills/mcp/workflow 适配层，**框架核心不依赖**（ADR-0008） | ADR-0008、10-plugin-sdk |
+| T10 | MAF 包族（Microsoft.Agents.AI.*）+ MCP 协议 SDK（ModelContextProtocol.*） | 已锁定（跟随官方 NuGet，单向依赖） | AI 能力域底层组合：llm/agents/skills/mcp/workflow 适配层，**框架核心不依赖**（ADR-0008）；MCP 协议层用官方稳定 SDK `ModelContextProtocol.Core` 2.2.0（ID-12） | ADR-0008、10-plugin-sdk |
 | T11 | .NET 10 文件式应用（File-based apps） | net10.0 内置 | 插件脚本形态：单文件 .cs + 顶层语句，`#:package` 依赖声明 ↔ manifest `dependencies` 白名单；复杂插件走 DLL 轨（现有 ALC 管线） | 02-plugin-model §4、ADR-0008 |
 
 ## 3. 各项在架构中的用途与相互关系
@@ -116,9 +116,9 @@ Cordis `extend()` 的原型继承 + 属性 shadow 语义，C# 版用三层混合
 
 ### 3.8 AI 能力域组合：MAF（T10）+ 文件式应用（T11）
 
-- **T10 单向组合**（ADR-0008）：llm/agents/skills/mcp/workflow 能力域适配器引用 `Microsoft.Agents.AI.*` 包族；**框架核心不引用任何 MAF 包**，通用插件运行时独立成立。MAF 基于微软 DI，与 T4 Keyed Services/子容器同源，集成成本低。
+- **T10 单向组合**（ADR-0008）：llm/agents/skills/mcp/workflow 能力域适配器引用 `Microsoft.Agents.AI.*` 包族；**框架核心不引用任何 MAF 包**，通用插件运行时独立成立。MAF 基于微软 DI，与 T4 Keyed Services/子容器同源，集成成本低。**MCP 协议层**：`Microsoft.Agents.AI.Mcp` 无稳定版 → 组合官方稳定协议 SDK `ModelContextProtocol.Core` 2.2.0（`Keystone.AI/Mcp/`，ID-12；agent 集成层待 MAF 稳定）。
 - **T11 插件脚本形态**：插件默认 = .NET 10 文件式应用（单文件 .cs + 顶层语句，`dotnet run app.cs` 心智模型），manifest `dependencies` ↔ `#:package` 引用声明；复杂插件（多文件/资源/私有依赖）走 DLL 轨，复用 T3 ALC 管线。Roslyn 编译管线（T2）对两种形态同一套。
-- **组合包 AOT 验收门**（规则 0 扩展，ADR-0008 风险缓解）：T10 组合的每个 MAF 包在纳入前验证 AOT 兼容（`PublishAot` 冒烟）；提交前跑规则 0 的标准验证命令，组合包不豁免。
+- **组合包 AOT 验收门**（规则 0 扩展，ADR-0008 风险缓解）：T10 组合的每个 MAF/MCP 包在纳入前验证 AOT 兼容（`PublishAot` 冒烟）；提交前跑规则 0 的标准验证命令，组合包不豁免。
 
 ## 4. 版本确认方式
 

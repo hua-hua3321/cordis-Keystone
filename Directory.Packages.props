@@ -23,6 +23,8 @@
     <!-- AI 组合（ADR-0008：单向依赖，仅 Keystone.AI 引用） -->
     <PackageVersion Include="Microsoft.Agents.AI.Workflows" Version="1.17.0" />
     <PackageVersion Include="Microsoft.Agents.AI" Version="1.17.0" />
+    <!-- MCP 协议层（ADR-0008 决策 4：MAF Mcp 未稳定，协议层组合官方稳定 SDK ModelContextProtocol.Core；agent 集成层待 MAF 稳定后接入） -->
+    <PackageVersion Include="ModelContextProtocol.Core" Version="2.2.0" />
     <!-- 静态分析（杀常见错误） -->
     <PackageVersion Include="Meziantou.Analyzer" Version="3.0.156" />
     <!-- 测试 -->

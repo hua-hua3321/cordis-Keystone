@@ -63,10 +63,10 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 
 ## 加工件说明（看板流水线使用）
 
-当前阶段：**实现期完成（M0-M13 全部通过，187 测试全绿）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
+当前阶段：**实现期完成（M0-M13 全部通过，195 测试全绿）+ P14 MCP 协议层落地（ADR-0008 决策 4 延迟项：MAF Mcp 无稳定版 → 协议层组合官方稳定 SDK ModelContextProtocol.Core 2.2.0）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
 
 - 构建：`dotnet build cordis-csharp.slnx`（已存在；警告即错误）
-- 测试：`dotnet test cordis-csharp.slnx`（已存在；187 个单测绿，M0-M13 全阶段）
+- 测试：`dotnet test cordis-csharp.slnx`（已存在；195 个单测绿，M0-M13 全阶段 + P14）
 - **实现纪律（13 §6）**：TDD 测试先行（红→绿→重构）；设计模式 + 契约/错误/实现边界抽象隔离；跨层单向依赖
 - 文档校验：`cd ~/Projects/central-governance && python3 scripts/validate_frontmatter.py`
 - 设计文档改动必须同步：AGENTS.md 索引、docs/architecture/ 对应文档、decisions/ ADR
