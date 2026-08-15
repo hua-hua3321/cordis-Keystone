@@ -31,5 +31,22 @@ public sealed class ServiceStore : IServiceStore
         => TryGet<T>(serviceName)
             ?? throw new KeystoneException(ErrorCode.GatingServiceNotFound, $"service '{serviceName}' is not provided");
 
+    /// <summary>注销服务（G-C3）：属主校验后移除；非属主抛 ServiceAlreadyRegistered。</summary>
+    public void Remove(string serviceName, string ownerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serviceName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+
+        if (_services.TryGetValue(serviceName, out var existing)
+            && !string.Equals(existing.OwnerId, ownerId, StringComparison.Ordinal))
+        {
+            throw new KeystoneException(
+                ErrorCode.ServiceAlreadyRegistered,
+                $"service '{serviceName}' is owned by '{existing.OwnerId}'");
+        }
+
+        _services.Remove(serviceName);
+    }
+
     private sealed record Entry(object Value, string OwnerId);
 }

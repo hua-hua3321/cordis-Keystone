@@ -17,6 +17,7 @@ public sealed class ContextFacade : IPluginContext, IContext
     private readonly EffectRegistry _effects = new();
     private readonly ILoggerFactory _loggerFactory;
     private readonly List<IContextInterceptor> _interceptors = [];
+    private readonly HashSet<string> _ownedServices = new(StringComparer.Ordinal);
 
     public ContextFacade(string name, IContext? parent = null, ILoggerFactory? loggerFactory = null)
     {
@@ -84,6 +85,7 @@ public sealed class ContextFacade : IPluginContext, IContext
 
         // 03 §2.1 组合语义：插件（子 scope）服务注册到公共祖先（root），兄弟插件经父链可见；
         // 隔离实例（独立 root / isolate）服务留在本地，互不可见（03 §2.2）。
+        _ownedServices.Add(serviceName); // G-C3：属主追踪（卸载时注销）
         if (Parent is not null && Root is ContextFacade root)
         {
             root._services.Set(serviceName, instance, ownerId: Name);
@@ -91,6 +93,27 @@ public sealed class ContextFacade : IPluginContext, IContext
         }
 
         _services.Set(serviceName, instance, ownerId: Name);
+    }
+
+    /// <summary>
+    /// G-C3 卸载钩子：注销本 context 属主提供的全部服务值（root/本地 store）。
+    /// 依赖方经 registry 事件重评（manifest 名由 PluginRuntime.StopCoreAsync 的 Unregister 处理）。
+    /// </summary>
+    public void RemoveOwnedServices()
+    {
+        foreach (var serviceName in _ownedServices)
+        {
+            if (Parent is not null && Root is ContextFacade root)
+            {
+                root._services.Remove(serviceName, ownerId: Name);
+            }
+            else
+            {
+                _services.Remove(serviceName, ownerId: Name);
+            }
+        }
+
+        _ownedServices.Clear();
     }
 
     // ── IPluginContext：事件订阅面（转发 Events；监听者 scope 缺省 = 本 context，G15）──

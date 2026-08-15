@@ -16,4 +16,10 @@ public interface IServiceStore
 
     /// <summary>读取服务；缺失抛 KeystoneException（GatingServiceNotFound）。</summary>
     T Get<T>(string serviceName);
+
+    /// <summary>
+    /// 注销服务（G-C3 值卸载，16-cordis-gap-review）：属主校验后移除。
+    /// 属主不匹配 → KeystoneException（ServiceAlreadyRegistered 语义：非属主不可移除）。
+    /// </summary>
+    void Remove(string serviceName, string ownerId);
 }

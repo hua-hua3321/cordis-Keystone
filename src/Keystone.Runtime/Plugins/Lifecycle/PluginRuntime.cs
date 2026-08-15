@@ -295,6 +295,12 @@ public sealed class PluginRuntime : IAsyncDisposable
             await WithTimeoutAsync(_plugin.DisposeAsync(), "plugin dispose").ConfigureAwait(false);
         }
 
+        // G-C3 值卸载：注销运行期 Provide 的服务值（root/本地 store，属主匹配）
+        if (_context is not null && _context is ContextFacade facade)
+        {
+            facade.RemoveOwnedServices();
+        }
+
         // ③ 摘除服务注册（internal/service 变更 → 依赖方重评）
         foreach (var service in _manifest.Provides)
         {

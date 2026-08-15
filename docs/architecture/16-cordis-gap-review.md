@@ -9,6 +9,7 @@ created: 2026-08-15
 > 对照 vendored Cordis 源码（`~/Projects/deepseek-harness/vendor/cordis/src/`，9 模块 2693 行）与 Keystone **当前实现**（M0-M13 + P14-P22，209 测试）的差距复核。
 > 07-cordis-migration-gap 是**设计期**差距分析（0 覆盖/7 部分/0 未覆盖）；本文是**实现后**复核——验证设计期映射是否真正落地，找出仍缺的实现缺口。
 > 方法：4 个独立子代理并行审计（Events/Registry+Service/Reflect+Context/Logger+Utils）+ 主代理独立验证关键点。
+> 执行状态：**🔴 3 高危已全部闭合（P24 G-C1 / P25 G-C2 / P26 G-C3，见 14-implementation-log）**；中危待排期。
 
 ## 1. 综合差距清单（按严重度）
 
@@ -18,7 +19,7 @@ created: 2026-08-15
 |---|------|-----------|--------------|------|
 | G-C1 | **插件配置注入缺失** | Fiber 启动前 `resolveConfig`（fiber.ts:641-645）；Config schema 校验 + 默认值补齐 | ~~`PluginRuntime` 调 `InitializeAsync(ctx, new Dictionary<string,object?>())`——空字典；`EntryOptions.Config` 从未传递~~ **✅ 已闭合（P24）**：Host 经 ConfigSchemaProvider + ConfigResolver 校验/补齐后传入；无 schema 直传；校验失败 = 插件 FAILED（隔离语义） | 配置驱动架构核心承诺兑现 |
 | G-C2 | **依赖恢复 re-arm 缺失** | 依赖消失 → 依赖方卸载；依赖重现 → 自动重启（fiber.ts:625-639 epoch 驱动） | ~~依赖消失 → `StopCoreAsync()` → DISPOSED；无重现订阅；`RestartAsync` 只接受 Active/Failed~~ **✅ 已闭合（P25）**：依赖重现（Available=true）→ Disposed 自动 StartAsync；订阅生命周期区分（自动卸载保留/显式停止销毁，防 ALC 泄漏） | 热更新链闭合（ADR-0007 决策 3 对称） |
-| G-C3 | **服务值卸载注销缺失** | provide 返回 disposer，fiber 卸载自动注销 + 唤醒依赖（reflect.ts） | `ContextFacade.Provide` 写 root store **无 Remove**；插件卸载只摘 manifest 声明名（ServiceRegistry.Unregister），运行期 Provide 的服务值滞留 | 依赖方 Get 得**陈旧服务**而非重评——卸载语义不完整（P21 补的父链解析放大此问题） |
+| G-C3 | **服务值卸载注销缺失** | provide 返回 disposer，fiber 卸载自动注销 + 唤醒依赖（reflect.ts） | ~~`ContextFacade.Provide` 写 root store 无 Remove；插件卸载只摘 manifest 声明名~~ **✅ 已闭合（P26）**：`IServiceStore.Remove`（属主校验）+ ContextFacade 属主追踪 + PluginRuntime 卸载钩子 RemoveOwnedServices——运行期 Provide 值卸载后注销，依赖方不再拿陈旧值 | 卸载语义完整（双轨补齐） |
 
 ### 🟡 中危（语义偏差或文档声称未落地）
 
@@ -63,7 +64,7 @@ created: 2026-08-15
 |--------|------|---------|--------|
 | P0 | G-C1 配置注入 | ✅ 已执行（P24，14 §7.24/ID-20）：`KeystoneHostOptions.ConfigSchemaProvider` + `ConfigResolver` 校验/默认值 → `InitializeAsync`；无 schema 直传；校验失败 = 插件 FAILED（隔离） | 中 |
 | P0 | G-C2 依赖 re-arm | ✅ 已执行（P25，14 §7.25/ID-21）：依赖重现自动重启；订阅生命周期区分（自动卸载保留/显式停止销毁）；StartCoreAsync 接受 Disposed 恢复路径 | 中 |
-| P0 | G-C3 服务值注销 | `IServiceStore.Remove` + 插件卸载时注销运行期 Provide 的值 + 依赖方重评 | 小 |
+| P0 | G-C3 服务值注销 | ✅ 已执行（P26，14 §7.26/ID-22）：`IServiceStore.Remove` + ContextFacade 属主追踪 + 卸载钩子；运行期值注销，依赖方不再拿陈旧值 | 小 |
 | P1 | G-C5 M4 延迟注入 | `IPluginContext.GetLazy<T>` / `Task<T>` 延迟解析（Lazy 语义） | 中 |
 | P1 | G-C4 事件 false 语义 | `EventBus` serial/bail 判定改 `value is null`（对齐 isBailed：false 不短路） | 小 |
 | P1 | G-C6 waterfall terminal | `PublishWaterfallAsync` 支持注入最内层 next + 返回最外层值 | 小 |
@@ -73,7 +74,7 @@ created: 2026-08-15
 ## 5. 结论
 
 - **核心骨架已等价覆盖**：生命周期状态机、quiesce、五分发事件、服务门控、Effect、Trace、配置层、加载层——设计期"7 项部分覆盖"的**主语义**均已落地
-- **真实差距 8 项**（3 高 + 5 中）：集中在**接线缺口**（配置注入/依赖恢复/值注销）与**语义边界**（false 短路/terminal 注入/延迟注入/导出器/热更新触发）
+- **真实差距 8 项**（3 高 + 5 中）：**🔴 3 高危已全部闭合（P24-P26）**——配置注入（G-C1）、依赖 re-arm（G-C2）、值注销（G-C3）；🟡 5 中危待排期（事件 false 语义/延迟注入/waterfall terminal/日志导出器/热更新触发）
 - **根因**：M3/P3 阶段的"功能独立测试通过"未做宿主级接线验收；事件语义映射停留在文档层未逐条对照源码
 
 ## 关联
