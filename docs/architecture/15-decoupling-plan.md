@@ -8,7 +8,7 @@ created: 2026-08-15
 
 > 目的：审计当前项目中对第三方包的直接耦合点，评估严重度，给出分阶段解耦工作计划。
 > 触发：用户评审 MCP 桥隔离后提出"还有多少地方直接耦合、没做隔离"。
-> 状态：**已审计（初版）**，待独立复核结果合入。执行记录走 14-implementation-log（ID 决策通道）。
+> 状态：**执行中**——D1 ✅（P16）、D2/D3/D4 待执行；执行记录走 14-implementation-log（ID 决策通道）。
 
 ## 1. 审计方法
 
@@ -40,17 +40,10 @@ created: 2026-08-15
 
 > 顺序原则：先修"高"（公共面被迫引用第三方 + 架构缺口），再修"中"（API 整洁度），"低"记录不动作。每项含：目标形态、验收条件、决策通道。
 
-### 阶段 D1：能力域接线 + 隔离（C1+C1b+C2，🔴）
+### 阶段 D1：能力域接线 + 隔离（C1+C1b+C2，🔴）—— ✅ 已执行（P16，2026-08-15）
 
 - **目标**：`KeystoneHost` 按 01-overview 接线能力域；`CapabilityDomain`/`CapabilityActor` 公共面不再暴露 Proto.Actor 类型
-- **设计方向**：
-  - `CapabilityDomain` 内部持有 `ActorSystem`（构造器私有化或经工厂创建），暴露 `Spawn` 返回框架自有句柄（如 `CapabilityHandle` 封装 `PID`），`RequestAsync` 收框架句柄
-  - `CapabilityActor` 降为 `internal`（实现细节，仅被 CapabilityDomain 使用）；`IActor`/`IContext` 随之内聚
-  - `KeystoneHostOptions` 增能力域配置（域名/并发/监督策略）；`KeystoneHost` 启动时创建 `ActorSystem` + 按配置 spawn 能力域，退出时优雅停止
-  - Proto.Actor 类型（`ActorSystem`/`PID`/`IActor`/`IContext`）全部退到 `Keystone.Runtime/Actors/` 实现内部
-- **验收**：`CapabilityDomain`/`KeystoneHost` 公共签名无 `Proto.*` 类型；宿主级集成测试（挂 fs 插件 → 跨域调用）绿；架构测试补"Keystone.Hosting 公共 API 无 Proto 引用"
-- **决策通道**：轻量 ID 决策（实现细节）；若涉及监督策略对外暴露 → 升级 ADR
-- **风险**：`ActorSystem` 生命周期归属（宿主 vs 域）需定；测试基建（现有 CapabilityDomainTests 用裸 ActorSystem）需迁移
+- **落地**（14 §7.16 / ID-14）：`CapabilityHandle` 封装 PID 作框架句柄；`CapabilityDomain` 构造器私有化 + `Create`（自有 ActorSystem）/`Attach`（注入测试缝，隔离测试豁免）；`CapabilityActor` 降 internal；`KeystoneHost` 增 `EnableCapabilityDomain`（默认开）+ `GetCapabilityDomain()`，StartAsync 创建 / ShutdownAsync 释放。200/200 全绿 + Runtime AOT 零 IL 警告。
 
 ### 阶段 D2：配置解析面收敛（C3，🟡）
 
@@ -92,8 +85,8 @@ created: 2026-08-15
 
 | 优先级 | 阶段 | 理由 |
 |--------|------|------|
-| P0 | D1（C1+C1b+C2） | 公共 API 被迫引用 Proto.Actor + 能力域 actor 是生产死代码 + 架构 01/09 承诺（监督/多实例）未兑现，影响宿主嵌入形态 |
-| P1 | D3（C6+C6b） | ADR-0004 承诺与实现差距，序列化是可配置性核心 |
+| P0 | D1（C1+C1b+C2） | ✅ 已执行（P16）：公共 API 被迫引用 Proto.Actor + 能力域 actor 是生产死代码 + 架构 01/09 承诺（监督/多实例）未兑现，影响宿主嵌入形态 |
+| P1 | D3（C6+C6b） | ADR-0004 承诺与实现差距，序列化是可配置性核心（下一阶段） |
 | P2 | D2（C3） | API 整洁度，零成本（可见性收敛） |
 | P2 | D4（C4+C8） | 边界明确 + 死依赖清理，工作量小 |
 | — | D5 | 每阶段内闭环，不单独排期 |
@@ -101,7 +94,9 @@ created: 2026-08-15
 ## 5. 待办
 
 - [x] 独立复核子代理结果已合入（修正 C3、新增 C1b/C6b/C8）
-- [ ] 阶段 D1 开工（TDD：先写隔离测试红，再实现）
+- [x] 阶段 D1 已执行（P16，14 §7.16/ID-14）
+- [ ] 阶段 D3 开工（序列化抽象，ADR 通道确认方案）
+- [ ] 阶段 D2/D4 开工
 - [ ] 每阶段按 13 §6 纪律执行：测试先行 + 决策沉淀 + 文档同步
 
 ## 关联

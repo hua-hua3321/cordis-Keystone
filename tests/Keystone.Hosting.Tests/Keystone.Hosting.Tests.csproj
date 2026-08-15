@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Keystone.Hosting\Keystone.Hosting.csproj" />
+    <ProjectReference Include="..\..\src\Keystone.Core\Keystone.Core.csproj" />
+    <ProjectReference Include="..\..\src\Keystone.Runtime\Keystone.Runtime.csproj" />
   </ItemGroup>
 
   <ItemGroup>

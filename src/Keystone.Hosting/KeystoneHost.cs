@@ -1,5 +1,6 @@
 using Keystone.Config.Entries;
 using Keystone.Core.Errors;
+using Keystone.Runtime.Actors;
 using Keystone.Runtime.Context;
 using Keystone.Runtime.Plugins.Lifecycle;
 using Keystone.Runtime.Plugins.Loading;
@@ -20,6 +21,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     private readonly List<EntryOptions> _tree = [];
     private readonly List<Func<PatchContextEventArgs, Func<Task>, Task>> _patchContextHandlers = [];
     private IContext? _rootContext;
+    private CapabilityDomain? _capabilityDomain;
     private bool _shutdown;
 
     public KeystoneHost(KeystoneHostOptions options)
@@ -58,8 +60,12 @@ public sealed class KeystoneHost : IAsyncDisposable
         var manifests = EnumerateLeaves(entries).Select(_options.ManifestProvider).ToList();
         ManifestValidator.Validate(manifests);
 
-        // 4-5. 根 context（能力域 context 挂其下，03 §1）
+        // 4-5. 根 context（能力域 context 挂其下，03 §1）+ 能力域（01 §2 管理层职责，09 §2）
         _rootContext = new ContextFacade("root");
+        if (_options.EnableCapabilityDomain)
+        {
+            _capabilityDomain = CapabilityDomain.Create(_options.CapabilityDomainName);
+        }
 
         // 6-7. 并行加载：依赖门控（PENDING 等待）天然实现拓扑序
         await Task.WhenAll(EnumerateLeaves(entries).Select(LoadEntryAsync)).ConfigureAwait(false);
@@ -84,7 +90,16 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         _plugins.Clear();
         _tree.Clear();
+
+        if (_capabilityDomain is not null)
+        {
+            await _capabilityDomain.DisposeAsync().ConfigureAwait(false);
+            _capabilityDomain = null;
+        }
     }
+
+    /// <summary>能力域（01 §2 管理层职责）：跨域请求入口。StartAsync 后可用；未启用时为 null。</summary>
+    public CapabilityDomain? GetCapabilityDomain() => _capabilityDomain;
 
     private void NotifyConfigUpdate()
         => ConfigUpdate?.Invoke(this, new ConfigUpdateEventArgs(DumpConfig()));

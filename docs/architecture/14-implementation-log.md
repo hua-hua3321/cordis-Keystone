@@ -43,6 +43,7 @@ created: 2026-08-15
 | P13 验收闭环 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | M13 | 4/4 验收全绿（§6.13） | §7.13 |
 | P14 MCP 协议层 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 6/6 验收全绿（§7.14；ADR-0008 决策 4 延迟项落地） | §7.14 |
 | P15 解耦审计 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 审计闭环（§7.15：C1-C8 清单 + 15-decoupling-plan 计划） | §7.15 |
+| P16 解耦 D1 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 能力域接线 + Proto 隔离（§7.16：C1/C1b/C2 闭合，200/200 全绿） | §7.16 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -102,6 +103,7 @@ created: 2026-08-15
 | ID-11 | 2026-08-15 | P8 | F10 跨 realm 服务转移优化**不实现** | 多实例隔离靠解析侧独立 context 天然达成（每实例 scope 独立）；转移是性能优化非语义必需，实现成本/收益比不划算 | 03 §2.2；Actors/ | 否 |
 | ID-12 | 2026-08-15 | P14 | MCP 协议层落地选型：MAF Mcp 无稳定版 → 协议层组合官方稳定 SDK `ModelContextProtocol.Core` 2.2.0 实现双端；agent 集成层（typed AIFunction 进 MAF workflow）待 `Microsoft.Agents.AI.Mcp` 稳定后接入 | ADR-0008 决策 4 方向不变（组合官方 MCP 不自研）；协议 SDK 稳定（net10.0 原生、AOT 友好、M.E.AI 同源）；避免 alpha 依赖锁死；已核实 MAF Mcp 依赖 ModelContextProtocol ≥1.2.0（分层非替代） | `src/Keystone.AI/Mcp/`（McpClientBridge/McpServerBridge）；仅 Keystone.AI 引用 | 否（ADR-0008 决策 4 备注 + 11-gap 追踪） |
 | ID-13 | 2026-08-15 | P14 | MCP 桥**契约隔离**：公共面 = Keystone 协议中立契约（接口 + DTO + options，零 SDK 类型），SDK 类型全部内聚于实现内部做映射；传输所有权按官方源码落实（client 会话由 McpClient 释放、server 会话由桥释放） | 用户评审质疑"MAF 稳定后要改很多东西"→ 隔离面设计；公共签名无 SDK 类型由测试锁定（换实现调用方零改动） | `src/Keystone.AI/Mcp/`（契约 + 实现分层） | 否（ADR-0008 决策 4 备注 + 14 §7.14） |
+| ID-14 | 2026-08-15 | P16 | 能力域隔离形态（15-plan D1）：CapabilityDomain 构造器私有化 + `Create`（自有 ActorSystem）/`Attach`（注入测试缝）；`CapabilityHandle` 封装 PID 作框架句柄；CapabilityActor 降 internal；KeystoneHost 接线（EnableCapabilityDomain 默认开） | 调用方常规路径零 Proto 类型（隔离目标）；Attach 是显式共享 ActorSystem 高级场景（隔离测试豁免）；Create 模式拥有 system 由域释放、Attach 模式调用方管理 | `src/Keystone.Runtime/Actors/`、`src/Keystone.Hosting/` | 否（15-plan D1 备注） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -358,6 +360,18 @@ created: 2026-08-15
 | 2026-08-15 | W15-02 | 独立子代理交叉复核（修正 C3 仅 NodeToObject public、新增 C1b CapabilityActor/C6b StoredFact/C8 Workflows 死依赖） | 审计 | — | — | 复核报告合入 | ✅ |
 | 2026-08-15 | W15-03 | 解耦计划文档：`15-decoupling-plan.md`（D1 能力域接线/隔离 🔴、D3 序列化抽象 🟡、D2 配置解析收敛 🟡、D4 AI 层收敛 + 死依赖 🟢） | 文档 | ADR-0004/0008/0002 | `docs/architecture/15-decoupling-plan.md` | frontmatter 校验 + AGENTS 索引 | ✅ |
 
+### 7.16 P16 解耦 D1：能力域接线 + Proto.Actor 隔离（C1/C1b/C2）
+
+> 15-decoupling-plan D1（P0）：CapabilityDomain/CapabilityActor 公共面零 Proto 类型 + KeystoneHost 接线能力域（01 §2/09 §2 承诺兑现）。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W16-01 | 隔离测试红：CapabilityDomain 公共签名无 Proto（Attach 豁免为显式测试缝）+ CapabilityActor 非 public；KeystoneHost 公共面无 Proto + 接线能力域 | 测试（TDD） | 15-plan D1 | `tests/Keystone.Runtime.Tests/CapabilityDomainIsolationTests.cs`、`tests/Keystone.Hosting.Tests/KeystoneHostCapabilityTests.cs` | 4 用例绿 | ✅ |
+| 2026-08-15 | W16-02 | CapabilityDomain 重构：构造器私有化 + `Create`（自有 ActorSystem）/`Attach`（注入测试缝）；`Spawn` 返回 `CapabilityHandle`（封装 PID）；`RequestAsync` 收句柄；`DisposeAsync` 释放（Create 模式拥有） | 实现（TDD） | ID-14 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilityHandle.cs` | 隔离测试绿 | ✅ |
+| 2026-08-15 | W16-03 | CapabilityActor 降 internal（Proto.IActor/IContext 内聚）；现有 CapabilityDomainTests 迁移到 Attach+CapabilityHandle | 重构（TDD） | ID-14 | `src/Keystone.Runtime/Actors/CapabilityActor.cs`、`tests/.../CapabilityDomainTests.cs` | 4 现有用例绿 | ✅ |
+| 2026-08-15 | W16-04 | KeystoneHost 接线：`KeystoneHostOptions.EnableCapabilityDomain`（默认开）+ `CapabilityDomainName`；StartAsync 创建、ShutdownAsync 释放、`GetCapabilityDomain()` 访问器 | 实现（TDD） | ID-14 | `src/Keystone.Hosting/KeystoneHost.cs`、`KeystoneHostOptions.cs` | Hosting 隔离测试绿 | ✅ |
+| 2026-08-15 | W16-05 | 全量回归 200/200 + Keystone.Runtime AOT 发布零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -405,6 +419,11 @@ created: 2026-08-15
 | ID-12 | ADR-0008 决策 4 | `AI/Mcp/`（双端桥） | W14-01~06 |
 | ID-13 | 用户评审 | `AI/Mcp/`（契约隔离） | W14-07 |
 | W15-01~03 | 用户评审 | `15-decoupling-plan.md`（C1-C8/D1-D5） | 审计闭环 |
+| W16-01 | 15-plan D1 | `CapabilityDomainIsolationTests`、`KeystoneHostCapabilityTests` | 4 用例绿 |
+| W16-02 | ID-14 | `Actors/CapabilityDomain.cs`、`CapabilityHandle.cs` | 隔离测试绿 |
+| W16-03 | ID-14 | `Actors/CapabilityActor.cs` | 4 现有用例绿 |
+| W16-04 | ID-14 | `Keystone.Hosting/KeystoneHost.cs`、`KeystoneHostOptions.cs` | Hosting 隔离测试绿 |
+| ID-14 | 15-plan D1 | `Actors/`、`Hosting/` | W16-01~05 |
 
 ## 9. 维护规则
 
