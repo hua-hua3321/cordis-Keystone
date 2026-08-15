@@ -64,10 +64,10 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 
 ## 加工件说明（看板流水线使用）
 
-当前阶段：**实现期完成（M0-M13 全部通过，196 测试全绿）+ P14 MCP 协议层落地 + P15 解耦审计（C1-C8 清单与 D1-D5 计划见 15-decoupling-plan，执行待排期）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
+当前阶段：**实现期完成（M0-M13 全部通过，206 测试全绿）+ P14 MCP 协议层落地 + P15-P20 解耦完成（D1-D5 全部执行：Proto.Actor/YamlDotNet/MessagePack/死依赖清理，C1-C8 见 15-decoupling-plan）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
 
 - 构建：`dotnet build cordis-csharp.slnx`（已存在；警告即错误）
-- 测试：`dotnet test cordis-csharp.slnx`（已存在；196 个单测绿，M0-M13 全阶段 + P14）
+- 测试：`dotnet test cordis-csharp.slnx`（已存在；206 个单测绿，M0-M13 全阶段 + P14-P20）
 - **实现纪律（13 §6）**：TDD 测试先行（红→绿→重构）；设计模式 + 契约/错误/实现边界抽象隔离；跨层单向依赖
 - 文档校验：`cd ~/Projects/central-governance && python3 scripts/validate_frontmatter.py`
 - 设计文档改动必须同步：AGENTS.md 索引、docs/architecture/ 对应文档、decisions/ ADR

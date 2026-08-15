@@ -47,6 +47,7 @@ created: 2026-08-15
 | P17 解耦 D3 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 序列化器抽象（§7.17：C6 闭合，IContractSerializer + JSON 注入，205/205 全绿） | §7.17 |
 | P18 解耦 D2 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 配置解析面收敛（§7.18：C3 闭合，EntryParser 零 YamlDotNet 泄漏，206/206 全绿） | §7.18 |
 | P19 解耦 D4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | AI 层边界 + Workflows 死依赖清理（§7.19：C8 闭合，C4 记录保持，206/206 全绿） | §7.19 |
+| P20 解耦 D5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 回归闭环（§7.20：206/206 + 六工程 AOT 零 IL 警告 + 15-plan 全部完成） | §7.20 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -407,6 +408,16 @@ created: 2026-08-15
 | 2026-08-15 | W19-02 | C4 边界确认：`SkillRegistry.FromManifest` 消费方仅 AI.Tests（组合层内部）→ 保持返回 MAF 类型，文档声明边界 | 评估 | ADR-0008 决策 3；15-plan D4 | `src/Keystone.AI/Skills/SkillRegistry.cs` | 无改动（记录保持） | ✅ |
 | 2026-08-15 | W19-03 | 全量回归 206/206 + Keystone.AI AOT 发布零 IL 警告（移除 Workflows 后） | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.20 P20 解耦 D5：回归闭环
+
+> 15-decoupling-plan D5：解耦全部执行后的最终回归 + 状态更新。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W20-01 | 全量回归（重构建）：206/206 全绿 | 验收 | — | — | `dotnet test`（全量重构建） | ✅ |
+| 2026-08-15 | W20-02 | 六工程 AOT 发布冒烟：Core/Config/Runtime/Hosting/Sdk/AI 零 IL 警告 | 验收 | 规则 0 | — | `PublishAot=true` × 6 | ✅ |
+| 2026-08-15 | W20-03 | 15-decoupling-plan 状态 → 全部完成（C1/C1b/C2/C3/C6/C6b/C8 闭合；C4/C5/C7 记录保持）+ AGENTS.md 同步 | 文档 | — | `15-decoupling-plan.md`、`AGENTS.md` | frontmatter 校验 | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -466,6 +477,7 @@ created: 2026-08-15
 | ID-16 | 15-plan D2 | `Config/Entries/EntryParser.cs` | W18-01~02 |
 | W19-01 | ID-17 | `Keystone.AI.csproj`、`Directory.Packages.props` | assets 断言无 Workflows |
 | ID-17 | 15-plan D4 | `Keystone.AI/`（csproj/CPM） | W19-01~03 |
+| W20-01~03 | 15-plan D5 | — | 206/206 + AOT × 6 + 文档闭合 |
 
 ## 9. 维护规则
 

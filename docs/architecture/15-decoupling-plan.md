@@ -8,7 +8,7 @@ created: 2026-08-15
 
 > 目的：审计当前项目中对第三方包的直接耦合点，评估严重度，给出分阶段解耦工作计划。
 > 触发：用户评审 MCP 桥隔离后提出"还有多少地方直接耦合、没做隔离"。
-> 状态：**执行中**——D1 ✅（P16）、D2/D3/D4 待执行；执行记录走 14-implementation-log（ID 决策通道）。
+> 状态：**✅ 全部执行完成（P16-P20）**——D1 能力域接线/隔离、D3 序列化抽象、D2 配置解析收敛、D4 AI 层边界+死依赖清理、D5 回归闭环。C1/C1b/C2/C3/C6/C6b/C8 已闭合；C4/C5/C7 记录保持（组合层/ADR 例外区背书）。执行记录见 14-implementation-log（ID-14~17）。
 
 ## 1. 审计方法
 
@@ -35,6 +35,8 @@ created: 2026-08-15
 | C8 | `Keystone.AI/Workflows/WorkflowBridge.cs` + `Keystone.AI.csproj` | 死依赖 | `Microsoft.Agents.AI.Workflows`（引用零使用） | 🟢 | WorkflowBridge 纯 Task.WhenAll 无 MAF 类型；csproj 引用该包但代码零使用；注释自述"由 HostAgent 驱动（实现期细化）"——ADR-0008 决策 2 workflow 域未实现（复核新增） |
 
 > 已隔离良好、无需处理：MCP 桥（ID-13 契约隔离）、AgileConfig（`IAgileConfigClient` 薄抽象 + M.E.C 扩展）、EventBus/Timer/EntryOptions/Manifest（纯框架类型）、`IConfiguration` 抽象引用（ADR-0013）、`ILoggerProvider`/`ILogger`（M.E.Logging 微软平台接口，非第三方）、PluginLoader/PluginAssemblyLoadContext（BCL `AssemblyLoadContext`）、Keystone.Hosting/Sdk 全部（零第三方 using）。
+
+**执行状态（2026-08-15，P16-P20）**：✅ 已闭合 C1/C1b/C2（P16-D1）、C6/C6b（P17-D3）、C3（P18-D2）、C8（P19-D4）；📌 记录保持 C4/C7（AI 组合层预期，ADR-0008 决策 2/3）、C5（Roslyn 例外区，ADR-0002）。
 
 ## 3. 分阶段解耦计划
 
@@ -65,11 +67,10 @@ created: 2026-08-15
   - **C7 记录不动作**：`KeystoneSkill : AgentSkill` 组合层预期
 - **验收**：206/206 全绿 + AI AOT 零 IL 警告（移除 Workflows 后）
 
-### 阶段 D5：回归闭环
+### 阶段 D5：回归闭环 —— ✅ 已执行（P20，2026-08-15）
 
-- **目标**：全量测试 + AOT 冒烟 + 文档同步 + 提交
-- **内容**：解耦后全量回归（`dotnet test`）、Keystone.Runtime/AI AOT 发布零 IL 警告、14 日志记录（W 编号 + ID 决策）、ADR 更新（如 D3）、AGENTS.md 状态同步
-- **验收**：全绿 + 文档闭合 + 提交纪律（R03）
+- **内容**：全量回归 206/206（重构建验证）、六工程 AOT 发布零 IL 警告、15-plan 状态更新、AGENTS.md 同步、git 提交
+- **验收**：✅ 全绿 + 文档闭合 + 提交纪律（R03）
 
 ## 4. 优先级建议
 
@@ -88,8 +89,8 @@ created: 2026-08-15
 - [x] 阶段 D3 已执行（P17，14 §7.17/ID-15）
 - [x] 阶段 D2 已执行（P18，14 §7.18/ID-16）
 - [x] 阶段 D4 已执行（P19，14 §7.19/ID-17：C8 闭合、C4/C7 记录保持）
-- [ ] 阶段 D5 回归闭环（全量 + AOT + 状态更新 + 提交）
-- [ ] 每阶段按 13 §6 纪律执行：测试先行 + 决策沉淀 + 文档同步
+- [x] 阶段 D5 回归闭环已执行（P20：206/206 + 六工程 AOT 零 IL 警告）
+- [x] 每阶段按 13 §6 纪律执行：测试先行 + 决策沉淀 + 文档同步（ID-14~17）
 
 ## 关联
 
