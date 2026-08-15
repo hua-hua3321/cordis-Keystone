@@ -12,18 +12,29 @@ created: 2026-08-15
 
 插件 = 标准单文件源文件（.cs）+ manifest（plugin-id + 版本 + 依赖白名单）。
 
-```csharp
+```json
 // 插件 manifest（cordis.plugin.json）
 {
   "id": "plugin-fs-local",
   "version": "1.0.0",
   "main": "FsLocalPlugin.cs",
   "dependencies": ["cordis-runtime", "cordis-contracts"],
-  "provides": ["IFsProvider"]
+  "provides": ["fs"],
+  "inject": ["llm", "telemetry"]
 }
 ```
 
 插件只能实现宿主定义的强类型接口（接口白名单），插件 API 面 = 宿主显式暴露的接口集。
+
+**两个依赖维度（正交，勿混）**（ADR-0007 决策 2）：
+
+| 字段 | 维度 | 解决什么 |
+|------|------|---------|
+| `dependencies` | 程序集编译白名单 | 插件代码能引用哪些程序集（Roslyn 引用集） |
+| `provides` / `inject` | 服务级运行时依赖 | 插件提供/消费哪些服务（依赖图 + PENDING 等待） |
+
+- `provides`/`inject` 里的名字是**服务名**（语义标识，类型在接口白名单声明）
+- manifest 校验器校验：inject 可达、依赖图无环、provides 类型在白名单内（启动期 fail-fast）
 
 ## 2. 接口白名单（决策 D1）
 
@@ -43,29 +54,35 @@ var fs = ctx.Get<IFsProvider>();
 
 ## 3. 键控服务 + 子容器（决策 D2）
 
-**键控服务（Keyed Services）**解决"强类型接口 + 运行期实例区分"：
+**键控服务（Keyed Services）**解决"强类型接口 + 运行期实例区分"（ADR-0007 决策 1）：
 
 ```csharp
-// 注册：key = 插件 ID 或能力域实例 ID
-services.AddKeyedScoped<IFsProvider, LocalFsProvider>("plugin-fs-a");
-services.AddKeyedScoped<IFsProvider, RemoteFsProvider>("plugin-fs-b");
+// 注册：key = 服务名（语义标识，消费者按服务名声明依赖，不感知提供者身份）
+services.AddKeyedScoped<IFsProvider, LocalFsProvider>("fs");
+services.AddKeyedScoped<ILLMProvider, ClaudeProvider>("llm");
 
-// 解析：编译期类型 + 运行期 key
-var fs = ctx.GetRequiredKeyedService<IFsProvider>("plugin-fs-a");
+// 解析：编译期类型 + 服务名 key
+var fs = ctx.Get<IFsProvider>("fs");          // GetRequiredKeyedService 等价物
+var llm = ctx.Get<ILLMProvider>("llm");
 ```
+
+- **key = 服务名**（类型 + 名称二元组），**插件 ID 只用于子容器分组与回收**，不参与服务解析 key——否则消费者必须知道"哪个插件提供 fs"，依赖从服务契约退化成实现耦合
+- 同一服务名同一 scope 内重复注册 = **报错**（rebind 语义，见 03-context §2），禁止同名覆盖
 
 **子容器**解决"隔离 + 回收"：
 
 ```
 每个插件实例 = 独立子 IServiceProvider（或 IServiceScope）
-  ├─ 插件注册：AddKeyedScoped 到自己的容器（key = 插件内服务名）
-  ├─ 解析：GetRequiredKeyedService<T>(key)   ← 编译期类型安全
+  ├─ 插件注册：AddKeyedScoped 到自己的容器（key = 服务名）
+  ├─ 解析：GetRequiredKeyedService<T>(服务名)   ← 编译期类型安全
   ├─ 隔离：实例间容器独立，同名 key 不冲突
   └─ 卸载：释放整个容器 = 自动回收所有注册
 ```
 
 - DI 没有原生的"移除键控服务"简单 API → 用子容器，卸载 = 扔容器
-- key 必须全局唯一（插件 ID），禁止同名覆盖
+- 子容器按插件 ID 分组（回收粒度），服务解析 key 按服务名（契约粒度）——两层各司其职
+
+**依赖门控激活**（ADR-0007 决策 3）：插件在 `inject` 声明的服务全部可用前保持 PENDING（状态机见 §6/ADR-0005），缺服务不抛异常而是等待；服务提供方卸载/替换 → 依赖方自动 reload/unload。这是"等依赖就绪再启动"的 Cordis 核心机制。
 
 ## 4. 插件加载（Roslyn 内存编译）
 
@@ -96,6 +113,7 @@ var plugin = (IPlugin)Activator.CreateInstance(pluginType);
 | 4 | 传递依赖 | 显式规则：X 走共享 or 私有，不靠运气 |
 | 5 | 编译引用集 vs 运行解析集一致 | 两者同源，防"编译过、跑缺引用" |
 | 6 | 插件间类型共享 | 走宿主接口/DTO 中转，插件不直接引用 |
+| 7 | 服务级依赖图（inject/provides） | manifest 校验器：可达性 + 无环 + 白名单检查；加载序 = 拓扑序 + PENDING 等待（ADR-0007） |
 
 ## 6. 注册回收（disposer 协议）
 
@@ -146,8 +164,9 @@ FileSystemWatcher 监听插件源文件
 - Roslyn 内存编译默认调试器进不去 → Emit 时带 embedded PDB + source link
 - 否则插件代码是黑盒，出 bug 只能靠日志
 
-## 10. 已决决策（ADR-0001/0002）
+## 10. 已决决策（ADR-0001/0002/0007）
 
 - **安全边界**：插件作为同进程可信代码执行（默认），信任边界 = 用户；预留 `IPluginHost` 扩展点支持未来进程隔离（ADR-0001）
 - **插件来源**：本地文件（初始），manifest 记录版本；演进路径 = 本地+版本记录 → 本地+签名校验 → `IPluginSource` 抽象引入远程分发（ADR-0001）
 - **AOT vs JIT**：JIT 运行时 + Roslyn 动态编译（热重载完整），不采用 NativeAOT；未来 AOT 走插件独立进程路线（ADR-0002）
+- **key 语义 / 依赖门控**：key = 服务名（类型+名称二元组），插件 ID 仅子容器分组；manifest 增 `inject` 服务级依赖字段；插件 PENDING 等待依赖就绪，服务变更自动重载（ADR-0007）

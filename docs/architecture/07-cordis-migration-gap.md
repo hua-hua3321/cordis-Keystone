@@ -24,7 +24,7 @@ created: 2026-08-15
 | service.ts | 115 | Service 基类、intercept 配置合并、可调用服务 |
 | utils.ts | 10236* | DisposableList、symbols、tracing（*字节数） |
 
-**文档基线**（docs/architecture/）：00-tech-stack（技术栈）、01-overview（总览）、02-plugin-model（插件模型）、03-context（作用域链）、04-pipeline（管道/事件双轨）、05-reliability（可靠性）、06-contracts（消息契约）+ ADR-0001~0004。
+**文档基线**（docs/architecture/）：00-tech-stack（技术栈）、01-overview（总览）、02-plugin-model（插件模型）、03-context（作用域链）、04-pipeline（管道/事件双轨）、05-reliability（可靠性）、06-contracts（消息契约）+ ADR-0001~0007（差距收敛状态见 §5）。
 
 **判定标准**：
 - **已覆盖**：当前文档已给出可与 Cordis 语义等价落地的设计，无需补充。
@@ -275,7 +275,7 @@ created: 2026-08-15
 
 | 项 | 理由 |
 |----|------|
-| G9/G11/G12/G15/G16（check 谓词、日志细节、事件过滤形状、动态能力清单） | 可观测性与健壮性细节；在插件 SDK 设计（01-overview §7 遗留待定）时一并处理 |
+| G9/G11/G12/G15/G16（check 谓词、日志细节、事件过滤形状、动态能力清单） | 可观测性与健壮性细节；插件 SDK 已落 [10-plugin-sdk.md](10-plugin-sdk.md)，实现期在 SDK 细化时一并处理 |
 
 ## 5. 影响范围
 
@@ -288,8 +288,10 @@ created: 2026-08-15
 
 **ADR 候选**（新决策落地前写 ADR，见 decisions/README.md）：
 - ✅ ADR-0005：插件生命周期状态机 + quiesce 收敛协议（G1/G2/G3）——**已落地**（`docs/decisions/adr-0005-plugin-lifecycle-quiesce.md`，accepted）
-- ADR-0006：事件分发模式全集（serial/bail 纳入 or 弃用声明）（G10）
-- ADR-0007（可能）：依赖门控激活与 manifest 服务级依赖（G5/G13）——若 G5 纳入第一版
+- ✅ ADR-0006：事件分发模式全集（serial/bail 纳入）（G10）——**已落地**（`docs/decisions/adr-0006-event-dispatch-modes.md`，accepted；06-contracts §2 口诀已修订）
+- ✅ ADR-0007：依赖门控激活与 manifest 服务级依赖（G4/G5/G13）——**已落地**（`docs/decisions/adr-0007-dependency-gating.md`，accepted；key 语义=服务名，manifest 增 inject 字段）
+
+**收敛状态（2026-08-15 差距收敛后刷新）**：P0 差距已全部收敛为 ADR 或文档修订——G1/G2/G3→ADR-0005、G10→ADR-0006、G4/G5/G13→ADR-0007；P1 的 G7/G8/G14 已在 03-context §2.1-§2.3 落地设计；G15 事件过滤形状已补 03-context §5；G11/G12 日志细节已补 05-reliability §5；**G6（intercept）与 G9（check 谓词）显式弃用（ADR-0010）**——intercept 通用机制不做，IOptions 命名选项为最终形态；check 谓词不做，"注册即用"，未就绪由插件运行期自管。**完整差距跟踪状态矩阵见 [11-gap-register.md](11-gap-register.md)**（07 为分析快照，状态变化不再改写本文）。
 
 **实现任务分解影响**（看板流水线，仅影响后续拆解，本文不创建子任务）：
 - P0 项应各自成为独立实现子任务（I→V→R 验证链），每项含对应文档更新

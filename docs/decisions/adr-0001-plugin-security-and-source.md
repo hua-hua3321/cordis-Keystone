@@ -12,7 +12,7 @@ status: accepted
 
 ## 背景（Context）
 
-Cordis C# 版采用"配置驱动、多实例隔离、热重载、中间件管道"的插件执行模型，插件以单文件 `.cs` + manifest 的形式由宿主加载（Roslyn 内存编译 + 私有 ALC，见 `docs/architecture/02-plugin-model.md` §4-§7）。
+Keystone采用"配置驱动、多实例隔离、热重载、中间件管道"的插件执行模型，插件以单文件 `.cs` + manifest 的形式由宿主加载（Roslyn 内存编译 + 私有 ALC，见 `docs/architecture/02-plugin-model.md` §4-§7）。
 
 方案总览与插件模型文档各列出了一项未决问题（`docs/architecture/01-overview.md` §7 待定决策；`docs/architecture/02-plugin-model.md` §10 待定）：
 

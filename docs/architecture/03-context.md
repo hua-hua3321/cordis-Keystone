@@ -43,6 +43,30 @@ C# 版用三层混合实现，各取所长，不造轮子：
 边界用例（同名服务不同 scope）：不同 scope 各自解析天然隔离——
 每个能力域实例用独立 scope 根（CreateScope 的 scope factory），隔离免费。
 
+### 2.1 rebind 语义（G14 决策）
+
+**同 scope 内重复注册同一服务名 = 报错**（对齐 Cordis "service X has been registered"，reflect.ts:289-291），不采用 MS.DI 的静默 last-wins：
+
+- "覆盖父级"只能通过**新建子 scope**（isolate/extend）提供新实现——父不被改
+- 与 02-plugin-model §3"同一服务名同 scope 重复注册 = 报错"一致
+- 意义：热重载"摘旧挂新"时不会静默替换，污染可被立即发现
+
+### 2.2 服务级隔离（isolate，G7 决策）
+
+`IServiceScope` 是整 scope 隔离，粒度过粗；Cordis 可对**单个服务名**建独立 scope（`isolate('fs', label)`，同 label 共享、不同 label 隔离）。C# 对应：
+
+- 每服务一个**命名子 scope**（或子容器按服务名分组）：`isolate("fs", "instance-a")` → 该服务名在独立容器内解析
+- 多实例模型下"实例 A 用 fs-A、实例 B 用 fs-B"只隔离 fs 服务，**不连带隔离其他服务**
+- 整 scope 隔离（每实例独立 scope 根）保留为默认，服务级隔离按需声明（配置层 `isolate` 字段）
+- **isolate 变更语义**（F10，P8 已落地）：条目的 isolate 声明变化 → 受影响服务触发依赖方重载（ADR-0007，P3 PluginRuntime 依赖消失→卸载 已实现）；**跨 realm 服务转移优化明确不实现**（ID-11：多实例隔离靠解析侧独立 context 天然达成，转移是性能优化非语义必需）；变更通知经 09 §5 PatchContext waterfall 接线
+
+### 2.3 set 属主校验（G8 决策）
+
+`IFeatureCollection.Set` 无属主概念、任意覆盖。C# context 门面加**服务属主**薄封装：
+
+- 服务注册记录提供插件 ID；set 时校验属主，非属主修改 = 抛错（对齐 Cordis reflect.ts:254-265）
+- 热重载时新旧插件无法互相改服务值，防止静默污染
+
 ## 3. 状态外置（决策 D6）
 
 ```
@@ -58,11 +82,11 @@ C# 版用三层混合实现，各取所长，不造轮子：
 
 ## 4. 事件分层（三类事件）
 
-| 类型 | Cordis 对应 | 用途 | 持久化 |
-|------|------------|------|--------|
-| 事实事件（session events） | durable facts | 必须存活（任务完成/失败） | 持久日志 |
-| 拦截事件（agent events） | waterfall | 拦截在途工作（pre-step/request） | 不持久 |
-| 策略事件（capability events） | parallel/emit | 附加策略不碰循环（fs/* tools/*） | 可选 |
+| 类型 | Cordis 对应 | 分发模式 | 用途 | 持久化 |
+|------|------------|---------|------|--------|
+| 事实事件（session events） | durable facts | emit | 必须存活（任务完成/失败） | append-only 事件日志（ADR-0009，P10 已实现：IEventStore + 文件/内存实现 + 重放 + 迁移） |
+| 拦截事件（agent events） | waterfall | waterfall | 拦截在途工作（pre-step/request） | 不持久 |
+| 策略事件（capability events） | serial/bail / parallel/emit | 决策型 serial/bail，观察型 parallel/emit | 附加策略不碰循环（fs/* tools/*） | 可选 |
 
 **扩展点选错领域是最大的架构错误**——事件归属必须在设计文档显式声明。
 
@@ -78,6 +102,8 @@ C# 版对应：
 - 服务注册走 isolate（每实例独立子容器）
 - 事件监听走各自 context 链（事件路由按 context/scope 过滤）
 - scope 父子关系在配置层显式声明（共享事件挂公共父 scope）
+
+**事件过滤实现形状**（防跨实例泄漏）：hook 注册时记录所属 context；分发时按 scope 链过滤（监听者 context 是分发者 context 的祖先/自身才投递）；`global: true` 的监听者跳过过滤（对齐 Cordis events.ts:171-174）。
 
 ## 6. 事件类型化
 
@@ -103,7 +129,9 @@ ctx.Events.Publish(new TaskCompleted(id, result));
 | 插件注册 | 短命 | 插件 dispose 时按 ID 回收 |
 | 事件监听 | 随插件 | 插件 dispose 时自动摘除 |
 
-## 8. 已决决策（ADR-0003）
+## 8. 已决决策（ADR-0003/0006）
 
 - **context 并发模型**：actor 串行处理（默认）——消息循环天然无竞争，context 状态免费安全；高吞吐域可显式声明 `concurrency: parallel` 由管理层扩展（ADR-0003）
 - **共享事件父 scope**：需要全局共享的事件（遥测/日志）挂公共父 scope，在配置层显式声明
+- **事件分发模式全集**：emit/parallel/serial/bail/waterfall 五种，策略事件按决策型（serial/bail）/观察型（parallel/emit）选模式（ADR-0006）
+- **rebind / 服务级隔离 / set 属主**：同 scope 重复注册报错、按服务名 isolate、set 属主校验（§2.1-§2.3，来源 G14/G7/G8）

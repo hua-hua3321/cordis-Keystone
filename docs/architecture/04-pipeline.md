@@ -28,32 +28,36 @@ Task/Message → [插件A] → [插件B] → [插件C] → 内置执行器
 Cordis `DispatchMode = 'waterfall'` 语义："每个 listener 包裹链的其余部分，
 调用 next() 放行，不调用就否决"。这就是 middleware pipeline 的另一种叫法。
 
-C# 实现形状（两种可选，早期定）：
+C# 实现形状（**已定案：形状 A**）：
 
 ```csharp
-// 形状 A：ASP.NET Core 风格（清晰）
+// 形状 A：ASP.NET Core 风格（采纳）
 public interface IMiddleware
 {
     Task InvokeAsync(IPluginContext ctx, RequestDelegate next);
 }
 
-// 形状 B：闭包风格（灵活）
+// 形状 B：闭包风格（弃用）
 // Func<IPluginContext, Func<Task>, Task>
 ```
 
-建议形状 A——清晰，且与 .NET 生态习惯一致。
+**采纳形状 A**：清晰、与 .NET 生态习惯一致、便于框架包装（日志/超时/异常处理可在 InvokeAsync 外包一层）；闭包风格留给宿主内部扩展点，不进插件 SDK。
+
+**形状 A/B 的分工澄清**：形状 A（`IMiddleware`）是**插件 SDK 接口面**；宿主内部组合实现使用形状 B 闭包（`List<Func<IPluginContext, Func<Task>, Task>>` 反向包装成链，ASP.NET Core 同款组合）——**动态管道组合（运行期插入节点 → 组合 → 执行）即编程式挂载插件的执行机制**（对应 Cordis `ctx.plugin()`，见 12-cordis-semantics-mapping.md §7.2）。A 是公开接口，B 是内部实现，两者不冲突。
 
 ## 3. 双轨模型（决策 D4）
 
-不是所有插件交互都是管道式的。两类插件区分：
+不是所有插件交互都是管道式的。三类插件区分：
 
 | 类型 | 走哪 | 语义 | 例子 |
 |------|------|------|------|
-| 管道插件 | 管道（waterfall） | 请求链上的 before/after/短路 | 校验、权限、限流、日志 |
+| 管道插件 | 管道（waterfall） | 请求链上的 before/after/短路 | 校验、限流、日志 |
+| 决策插件 | 事件（serial/bail） | 注册序执行，首个决策者生效 | 权限检查链、handler 选择 |
 | 观察者插件 | 事件（parallel/emit） | 监听不干预 | 遥测、审计、指标、事件记录 |
 
 **强制观察者插件进管道 = 白白增加每个请求的延迟和耦合。**
-双轨是 Cordis 验证过的设计（按插件性质选分发模式）。
+**强制决策插件进管道 = 语义错位**（waterfall 是包裹式，无法表达"第一个返回决策者生效"）。
+三轨是 Cordis 验证过的设计（按插件性质选分发模式，ADR-0006）。
 
 ## 4. 中间件接口设计
 
@@ -107,7 +111,9 @@ ctx.Events.Subscribe<TaskCompleted>(static e => telemetry.RecordEnd(e.TaskId, e.
 - 拦截事件：waterfall（管道即此类）
 - 策略事件：parallel/emit（观察者）
 
-## 8. 已决决策（ADR-0003/0004）
+## 8. 已决决策（ADR-0003/0004/0006）
 
 - **管道配置热更新**：原子替换（swap）——配置变更 → 基于当前 context 构建新管道实例 → 原子切换引用 → 旧管道在途请求排空后销毁；保留 actor/context，只换管道链（ADR-0003）
 - **管道节点粒度**：一个插件 = 一个中间件节点（单节点），复杂能力通过组合多个插件实现
+- **中间件形状**：形状 A（`IMiddleware`，ASP.NET Core 风格），闭包形状弃用（§2 定案）
+- **三轨分发**：管道插件（waterfall）/ 决策插件（serial/bail）/ 观察者插件（parallel/emit）（ADR-0006）

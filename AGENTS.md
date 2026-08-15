@@ -4,10 +4,10 @@ tags: [cordis-csharp, architecture, dotnet, plugin-system]
 created: 2026-08-15
 ---
 
-# Cordis C# 方案（cordis-csharp）
+# Keystone 地基插件框架（cordis-csharp）
 
-> 将 DeepSeek Harness 的 vendored Cordis 插件框架理念，用 C# / .NET 重新实现的标准方案。
-> 本目录是方案文档的唯一真源（Single Source of Truth），其余文档只放指针。
+> 基于 .NET 的通用地基插件框架：任何 C# 应用可嵌入。插件理念受 DeepSeek Harness vendored Cordis 启发（参照基线），**独立命名与定位，非 Cordis 再实现**；"Cordis" 在本仓仅作参照上游引用。
+> 本目录是方案文档与实现进度的唯一真源（Single Source of Truth），其余文档只放指针。
 
 ## ⚠️ 规则 0（最高优先级，先于一切规则）：AOT 就绪编码标准
 
@@ -25,12 +25,14 @@ created: 2026-08-15
 
 **验证方式**：每次提交前跑 `dotnet publish -c Release -r <rid> --self-contained /p:PublishAot=true` 冒烟（若当前 JIT 配置下该命令可用则必须跑通；不可用则跑 `dotnet build -warnaserror` 确认无裁剪相关警告）。
 
-> 例外声明：ADR-0002 明确插件运行时由 Roslyn 内存编译进独立 ALC——**插件加载层（Roslyn/ALC）是刻意排除在 AOT 标准之外的唯一区域**，宿主其余部分一律遵守本条。
+> 例外声明（两处）：① ADR-0002——插件运行时由 Roslyn 内存编译进独立 ALC，**插件加载层（Roslyn/ALC）刻意排除在 AOT 标准之外**；② ADR-0015——**Proto.Actor 库自身的 AOT 警告（IL2104/IL3053）例外**（宿主自身代码零告警不变）。其余部分一律遵守本条。
 
 ## 项目定位
 
-C# 版 Cordis 插件框架：配置驱动、多实例隔离、热重载、中间件管道式的插件执行模型。
-不重造 DI/中间件/配置等 .NET 已提供的能力，只实现 Cordis 独有的部分（ALC 插件加载、按插件 ID 分组回收、管道配置 schema、插件 SDK）。
+Keystone 通用地基插件框架：配置驱动、多实例隔离、热重载、中间件管道式的插件执行模型；任何 C# 应用可嵌入，不绑定业务领域。
+不重造 DI/中间件/配置等 .NET 已提供的能力，只实现框架独有的部分（ALC 插件加载、按插件 ID 分组回收、管道配置 schema、插件 SDK）。
+配置来源解绑（ADR-0013）：提供者抽象 + 默认本地 YAML（开发阶段，ADR-0014；AgileConfig 配置中心为预留可选源），用户可自实现；禁止硬编码，框架可调值一律走配置。
+AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP，不重造（ADR-0008）。
 
 ## 文档索引
 
@@ -44,7 +46,14 @@ C# 版 Cordis 插件框架：配置驱动、多实例隔离、热重载、中间
 | [architecture/05-reliability.md](architecture/05-reliability.md) | 可靠性：错误处理、监督策略、超时熔断、可观测性 | 标准 |
 | [architecture/06-contracts.md](architecture/06-contracts.md) | 消息契约：请求模型、请求 ID、链路追踪 | 标准 |
 | [architecture/07-cordis-migration-gap.md](architecture/07-cordis-migration-gap.md) | Cordis 迁移差距：7 必查项结论 + 差距清单/优先级/影响 | 标准 |
-| [decisions/](decisions/README.md) | 决策记录（ADR-0001 ~ 0005，设计期已收敛） | accepted |
+| [architecture/08-configuration-layer.md](architecture/08-configuration-layer.md) | 配置层：配置形态、条目模型、分层叠加、schema 校验、热更新触发 | 标准 |
+| [architecture/09-management-layer.md](architecture/09-management-layer.md) | 管理层：启动流程、监督接线、进程级优雅关闭 | 标准 |
+| [architecture/10-plugin-sdk.md](architecture/10-plugin-sdk.md) | 插件 SDK：接口面、配置注入、计时器、manifest schema、模板工程 | 标准 |
+| [architecture/11-gap-register.md](architecture/11-gap-register.md) | 差距跟踪表：G1-G16 + 补充排查项的处理状态矩阵（07 是快照，本文是现状） | 标准 |
+| [architecture/12-cordis-semantics-mapping.md](architecture/12-cordis-semantics-mapping.md) | 语义映射参考：被弃用/未解析 Cordis 机制（intercept/check、H/M/L/F 系列）的 C# 对应物字典 + 导出面穷举审计凭证 | 标准 |
+| [architecture/13-implementation-plan.md](architecture/13-implementation-plan.md) | 分阶段实施计划：M0-M13 里程碑、每阶段目标/验收条件/DoD、待定项分配 | 标准 |
+| [architecture/14-implementation-log.md](architecture/14-implementation-log.md) | 实施记录：工作日志/实现期决策/偏差/验收台账/三向回溯索引（与 13 配套） | 标准 |
+| [decisions/](decisions/README.md) | 决策记录（ADR-0001 ~ 0015，设计期已收敛；实现期新决策走 14 §4 通道） | accepted |
 
 ## 治理
 
@@ -54,10 +63,11 @@ C# 版 Cordis 插件框架：配置驱动、多实例隔离、热重载、中间
 
 ## 加工件说明（看板流水线使用）
 
-当前阶段：**设计期**（只有 docs/，无代码）。
+当前阶段：**实现期完成（M0-M13 全部通过，187 测试全绿）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
 
-- 构建：`dotnet build cordis-csharp.slnx`（尚无 slnx，代码落地后创建）
-- 测试：`dotnet test cordis-csharp.slnx`（尚无测试项目，代码落地后创建）
+- 构建：`dotnet build cordis-csharp.slnx`（已存在；警告即错误）
+- 测试：`dotnet test cordis-csharp.slnx`（已存在；187 个单测绿，M0-M13 全阶段）
+- **实现纪律（13 §6）**：TDD 测试先行（红→绿→重构）；设计模式 + 契约/错误/实现边界抽象隔离；跨层单向依赖
 - 文档校验：`cd ~/Projects/central-governance && python3 scripts/validate_frontmatter.py`
 - 设计文档改动必须同步：AGENTS.md 索引、docs/architecture/ 对应文档、decisions/ ADR
 - 参考项目：cognitive-tree-csharp（同构看板，slug cognitivetree-c / cognitive-tree-csharp）

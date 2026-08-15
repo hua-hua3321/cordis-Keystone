@@ -61,20 +61,35 @@ CancellationToken 贯穿全链（接口第一版就带 token，后期加是破�
 
 ### 链路追踪
 
-- 每个请求/任务一个 RequestId（Guid），贯穿管道全链
-- 日志格式：`{requestId} {pluginId} {phase} {elapsed}`
+- 每个请求/任务一个 RequestId（Guid），贯穿管道全链（06-contracts §3）
+- 用 `System.Diagnostics.Activity` + DiagnosticSource 承载（对齐 Cordis trace/bind 的替代物，07 §2.3 第 5 项），Activity 携带 TaskId/ParentTaskId/能力域
+- 日志格式：`{taskId} {pluginId} {phase} {elapsed}`
 - 管道执行链路日志：每个节点 before/after + 耗时
 
 ### 指标
 
 - 插件级：调用次数、失败率、延迟（p50/p95）
 - 管道级：总耗时、节点分布
-- 热重载审计：谁在什么时候重载了哪个插件，为什么（事件记录）
+- 热重载审计：谁在什么时候重载了哪个插件，为什么（事件记录，含 quiesce 收敛结果）
 
 ### 日志
 
-- ILogger 注入 context
-- 插件必须通过 ctx 日志（不直接 console）
+- **命名规则**：`ILoggerFactory.CreateLogger(category)`，category = `{能力域}/{插件 ID}`（对齐 Cordis 按 fiber 名自动命名，07 G11）——按插件过滤日志的前提
+- **级别覆盖**：每插件经 `IOptions<T>` 命名选项覆盖 category 的 name/level（对齐 Cordis intercept 配置，07 G12）
+- **provider 接线清单**：Console（默认）+ File（滚动，可选）+ 结构化 exporter（可选），均为 `ILoggerProvider` 实现
+- **结构化日志记录模型**（对齐 Cordis Message 结构 / ADR-0004 显式序列化契约）：
+
+  | 字段 | 类型 | 说明 |
+  |------|------|------|
+  | Timestamp | DateTimeOffset | 记录时间 |
+  | TaskId / ParentTaskId | Guid? | 任务关联（链路追踪键） |
+  | Category | string | 能力域/插件 ID |
+  | Level | LogLevel | 级别 |
+  | Phase | string | 管道阶段（before/after/error） |
+  | Elapsed | TimeSpan? | 节点耗时 |
+  | Message | string | 格式化消息 |
+
+- ILogger 注入 context；插件必须通过 `ctx.Logger`（10-plugin-sdk §4），不直接 console
 
 ## 6. 测试策略
 
@@ -88,7 +103,9 @@ CancellationToken 贯穿全链（接口第一版就带 token，后期加是破�
 
 **热重载回收测试是硬门**——测不好，热重载就是纸面能力。
 
-## 7. 待定
+## 7. 待定项收敛（2026-08-15）
 
-- 回滚语义：管道节点失败后，已执行节点是否回滚（事务边界）
-- 重试的幂等键：任务 ID 之外是否需要插件级幂等键
+原待定两项已收敛为决策（实现期不再悬空）：
+
+- **回滚语义（已决：默认不回滚）**：管道节点失败 → 错误中间件短路返回（§1），**不做自动回滚**；事务边界由插件显式声明——插件需要补偿时实现宿主提供的补偿接口（如 `ITransactional`，在管道入口声明参与事务），宿主按声明顺序执行补偿。理由：自动回滚对"只读/幂等副作用"是纯开销，事务场景是少数显式声明更清晰。
+- **重试幂等键（已决：TaskId 默认，插件级扩展可选）**：默认 TaskId 即幂等键（06-contracts §4）；插件级幂等键（业务自然键）作为显式扩展——插件可实现 `IIdempotencyKeyProvider` 提供业务键，宿主在重试去重时优先使用。第一版仅实现 TaskId 去重，插件级键留接口不进默认实现。

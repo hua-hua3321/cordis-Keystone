@@ -6,14 +6,14 @@ created: 2026-08-15
 
 # 01 — 方案总览
 
-> Cordis C# 版的三层架构。本文是架构总纲，细节见各专题文档。
+> Keystone的三层架构。本文是架构总纲，细节见各专题文档。
 
 ## 1. 核心思想
 
 Cordis（JS）的核心是可组合性：一切皆插件，插件贡献服务、类型化事件、可逆 effects 到共享 context。
 C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性，并引入 JS 版本没有的生命周期管理（监督树、热重载）。
 
-**不重造**：DI（IServiceProvider）、中间件管道（ASP.NET Core 形状）、配置（IOptions）、日志（ILogger）、后台服务（IHostedService）。
+**不重造**：DI（IServiceProvider）、中间件管道（ASP.NET Core 形状）、配置（IOptions）、日志（ILogger）、后台服务（IHostedService）、**AI 底层（LLM 适配/技能包/MCP/agent 编排——组合微软官方 MAF/MCP，ADR-0008）**。
 **只实现**：ALC 插件加载层、按插件 ID 分组的注册回收、管道配置 schema、插件 SDK。
 
 ## 2. 三层架构
@@ -81,11 +81,12 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 ## 6. 明确不做（克制边界）
 
 - 不重造 DI 容器 / 中间件框架 / 配置系统 / 日志系统
+- **不重造 AI 底层**（LLM 适配 / 技能包 / MCP 双端 / agent 编排——组合微软官方 MAF/MCP，单向依赖，ADR-0008）
 - 不做全 actor 化（高频紧密调用留在域内直接调用，不走消息）
 - 不强制"一切皆插件"到 UI 层
 - 不引入 JS 生态兼容层
 
-## 7. 已决决策（ADR-0001 ~ 0004）
+## 7. 已决决策（ADR-0001 ~ 0010）
 
 设计期全部待定决策已收敛为 ADR，见 [decisions/](../decisions/README.md)：
 
@@ -93,5 +94,11 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 - ADR-0002 AOT vs JIT（JIT + Roslyn 动态编译，不采用 NativeAOT）
 - ADR-0003 context 并发模型（串行默认）+ 管道配置热更新（原子替换）
 - ADR-0004 消息契约（Payload 强类型 + 显式序列化契约）+ 跨域编排（TaskId 贯穿 + 全等聚合）
+- ADR-0005 插件生命周期状态机 + quiesce 收敛协议
+- ADR-0006 事件分发模式全集（serial/bail 纳入）
+- ADR-0007 依赖门控激活 + manifest 服务级依赖（inject）
+- ADR-0008 AI 能力域组合（组合微软官方 MAF/MCP，单向依赖，不重造 AI 底层）
+- ADR-0009 事件持久化（事实事件 append-only 事件日志 + IEventStore）
+- ADR-0010 G6/G9 取舍（弃用 intercept 通用语义与 check 谓词）
 
-遗留待定：插件 SDK 体验、可观测性细节（指标/链路）——实现阶段按需补充 ADR。
+遗留待定已收敛：插件 SDK 体验 → [10-plugin-sdk.md](10-plugin-sdk.md)；可观测性细节（指标/链路）→ [05-reliability.md](05-reliability.md) §5；配置层与管理层细节 → [08-configuration-layer.md](08-configuration-layer.md) / [09-management-layer.md](09-management-layer.md)。

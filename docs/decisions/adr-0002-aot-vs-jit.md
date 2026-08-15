@@ -12,7 +12,7 @@ status: accepted
 
 ## 背景（Context）
 
-Cordis C# 版的核心卖点是**插件热重载**：插件 = 单文件 `.cs`，运行时由 Roslyn 内存编译（`CSharpCompilation.Create` + `Emit(MemoryStream)`）加载进私有 ALC，实现"改源文件 → 重编译 → 摘旧挂新"（`docs/architecture/02-plugin-model.md` §4-§7）。
+Keystone的核心卖点是**插件热重载**：插件 = 单文件 `.cs`，运行时由 Roslyn 内存编译（`CSharpCompilation.Create` + `Emit(MemoryStream)`）加载进私有 ALC，实现"改源文件 → 重编译 → 摘旧挂新"（`docs/architecture/02-plugin-model.md` §4-§7）。
 
 同时，C# 生态有 NativeAOT 部署选项（单二进制、无 JIT、启动快、内存低）。
 
