@@ -43,6 +43,8 @@ C# 版用三层混合实现，各取所长，不造轮子：
 边界用例（同名服务不同 scope）：不同 scope 各自解析天然隔离——
 每个能力域实例用独立 scope 根（CreateScope 的 scope factory），隔离免费。
 
+> **实现备注（2026-08-15，P21，见 14-implementation-log §7.21 / DEV-02 / ID-18）**：服务解析链落地形态——`ContextFacade.Provide` 在 context 有父时写入**公共祖先（root）**（§2.1 组合语义：子不覆盖父、首次注册公共区，属主校验保留）；`Get/TryGet` 沿父链向上（自己 → 父 → 根）。插件（共享 root 父）的服务经父链跨插件可见（inject 依赖注入，ADR-0007）；隔离实例（独立 root）服务留本地，互不可见（§2.2 不变）。
+
 ### 2.1 rebind 语义（G14 决策）
 
 **同 scope 内重复注册同一服务名 = 报错**（对齐 Cordis "service X has been registered"，reflect.ts:289-291），不采用 MS.DI 的静默 last-wins：

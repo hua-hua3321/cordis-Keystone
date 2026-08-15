@@ -48,6 +48,7 @@ created: 2026-08-15
 | P18 解耦 D2 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 配置解析面收敛（§7.18：C3 闭合，EntryParser 零 YamlDotNet 泄漏，206/206 全绿） | §7.18 |
 | P19 解耦 D4 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | AI 层边界 + Workflows 死依赖清理（§7.19：C8 闭合，C4 记录保持，206/206 全绿） | §7.19 |
 | P20 解耦 D5 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 回归闭环（§7.20：206/206 + 六工程 AOT 零 IL 警告 + 15-plan 全部完成） | §7.20 |
+| P21 集成验收 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 端到端集成测试（§7.21：真实插件组全链跑通 + B5 跨插件服务解析修复，207/207 全绿） | §7.21 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -111,6 +112,7 @@ created: 2026-08-15
 | ID-15 | 2026-08-15 | P17 | 序列化器抽象（15-plan D3）：`IContractSerializer` + 默认 MessagePack + 可注入 JSON（STJ 源生成上下文）；应用到事件持久化（FileEventStore 构造器注入） | ADR-0004"JSON 可配置"兑现；跨域边界（Proto.Actor 引用传递）无实际序列化，`[MessagePackObject]` 契约声明保留；唯一消费点=事件持久化；AOT 安全（源生成，禁反射） | `src/Keystone.Core/Serialization/`、`src/Keystone.Runtime/Persistence/FileEventStore.cs` | 否（ADR-0004 备注 + 15-plan D3） |
 | ID-16 | 2026-08-15 | P18 | 配置解析面收敛（15-plan D2）：`EntryParser.NodeToObject` 降 private，YamlDotNet 类型退出公共面 | 无外部调用（仅内部递归）；Parse(string) 返回纯框架类型足够；隔离测试锁定 | `src/Keystone.Config/Entries/EntryParser.cs` | 否（15-plan D2） |
 | ID-17 | 2026-08-15 | P19 | AI 组合层边界（15-plan D4）：①移除 `Microsoft.Agents.AI.Workflows` 死依赖（WorkflowBridge 纯 Task，MAF 图构建未接线前不引）；②`SkillRegistry` 返回 MAF 类型保持（唯一消费方=AI 层内部，组合层预期） | 死依赖违反单向组合克制；C4 按"仅组合层内部消费→保持"标准（与 Mcp 桥不同：Mcp 是框架通用能力需隔离，skills 是 AI 专属） | `Keystone.AI.csproj`、`Directory.Packages.props` | 否（15-plan D4） |
+| ID-18 | 2026-08-15 | P21 | 跨插件服务解析修复（集成验收 W21-02）：ContextFacade.Provide 有父时写公共祖先（root）——03 §2.1 组合语义（子不覆盖父、首次注册公共区）；Get/TryGet 沿父链向上（自己 → 父 → 根） | 集成测试暴露 DEV-02（03 §2"先自己再父"未实现）；兄弟插件共享 root 经父链可达；隔离实例（独立 root）天然隔离（03 §2.2 不变） | `src/Keystone.Runtime/Context/ContextFacade.cs` | 否（14 §5 DEV-02） |
 
 **格式**：决定（一句话，可执行）→ 理由（1-2 条）→ 影响面（哪些模块受影响）→ 升级标记。
 
@@ -121,6 +123,7 @@ created: 2026-08-15
 | 编号 | 日期 | 阶段 | 偏差描述 | 原因 | 处置 | 关联 |
 |------|------|------|---------|------|------|------|
 | DEV-01 | 2026-08-15 | P2 | 属主校验在插件 A 提供服务、插件 B 也声明 provides 同名的场景与 02 §1 描述冲突 | 02 §1 未定义同名 provides 冲突优先级 | 处置中：按 rebind 同 scope 重复=错误（03 §2.1）→ 需补充文档说明，待 P3 定 | 03 §2.1；02 §1 |
+| DEV-02 | 2026-08-15 | P21 | 03 §2 承诺"服务解析链：scope 内先查自己，再查父 scope"，但实现 ServiceStore 每 context 独立、Get 只查本地——跨插件 inject 服务不可解析（集成测试 W21 暴露） | 实现期 P2 遗漏父链解析；Provide 写本地导致兄弟插件互不可见 | ①改实现适配文档：ContextFacade.Provide 有父时写公共祖先（root，03 §2.1 组合语义）+ Get/TryGet 沿父链向上（W21-02，ID-18）；隔离实例（独立 root）天然隔离不变 | 03 §2/§2.2；ADR-0007 |
 
 **处置三选一**：①改实现适配文档 ②更新文档+必要时写 ADR ③记录"已知限制"（仅限影响面小且已评估）。处置必须可追溯（关联列写文档/ADR 位置）。
 
@@ -418,6 +421,19 @@ created: 2026-08-15
 | 2026-08-15 | W20-02 | 六工程 AOT 发布冒烟：Core/Config/Runtime/Hosting/Sdk/AI 零 IL 警告 | 验收 | 规则 0 | — | `PublishAot=true` × 6 | ✅ |
 | 2026-08-15 | W20-03 | 15-decoupling-plan 状态 → 全部完成（C1/C1b/C2/C3/C6/C6b/C8 闭合；C4/C5/C7 记录保持）+ AGENTS.md 同步 | 文档 | — | `15-decoupling-plan.md`、`AGENTS.md` | frontmatter 校验 | ✅ |
 
+### 7.21 P21 集成验收：端到端真实功能测试
+
+> 用户要求"接起来跑通整体"。审查发现各能力域独立（断点 B1-B5），设计端到端集成测试用真实插件组走全链。过程中发现并修复 2 个真实断点。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W21-01 | 集成审查：确认断点——B1 能力域空转（Spawn 无人调用）/B2 插件 handler 无桥/B3 管道未接宿主/B4 宿主未公开事件面/B5 跨插件服务解析缺父链（03 §2 设计未实现） | 审计 | 01/03/06/09 | — | 断点清单 | ✅ |
+| 2026-08-15 | W21-02 | **修复 B5（真实缺陷）**：ContextFacade.Provide 有父时写公共祖先（root，03 §2.1 组合语义）+ Get/TryGet 沿父链向上解析——插件兄弟经 root 共享服务，隔离实例（独立 root）天然隔离 | 修复（TDD） | 03 §2/§2.2；ADR-0007 | `src/Keystone.Runtime/Context/ContextFacade.cs` | 现有 89 Runtime 测试全绿 + 新集成验证 | ✅ |
+| 2026-08-15 | W21-03 | 端到端集成测试：calculator（真实计算服务）/telemetry（inject 门控注入）/audit（事件观察）三插件，全链验证——配置 YAML → 宿主启动 → Roslyn 编译加载 → 依赖门控 → 服务注入 → 能力域跨域调用（20+22=42，TaskId 贯穿）→ 事件观察（audit 收到）→ 优雅关闭（幂等） | 测试（集成） | — | `tests/Keystone.Hosting.Tests/EndToEndIntegrationTests.cs` | 1 集成用例绿 | ✅ |
+| 2026-08-15 | W21-04 | 全量回归 207/207 + Keystone.Runtime AOT 发布零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
+> **B4 记录**：宿主未公开事件总线（测试经反射访问 root context）——事件面暴露待后续（宿主 API 完善阶段）。
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -478,6 +494,10 @@ created: 2026-08-15
 | W19-01 | ID-17 | `Keystone.AI.csproj`、`Directory.Packages.props` | assets 断言无 Workflows |
 | ID-17 | 15-plan D4 | `Keystone.AI/`（csproj/CPM） | W19-01~03 |
 | W20-01~03 | 15-plan D5 | — | 206/206 + AOT × 6 + 文档闭合 |
+| W21-01 | 01/03/06/09 | — | 断点清单 B1-B5 |
+| W21-02 | ID-18 | `Context/ContextFacade.cs` | 89 Runtime 测试 + 集成验证 |
+| W21-03 | — | `tests/Keystone.Hosting.Tests/EndToEndIntegrationTests.cs` | 1 集成用例绿 |
+| ID-18 | 03 §2；DEV-02 | `Context/ContextFacade.cs` | W21-02 |
 
 ## 9. 维护规则
 

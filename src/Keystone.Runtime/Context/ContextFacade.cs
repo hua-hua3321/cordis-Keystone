@@ -49,18 +49,47 @@ public sealed class ContextFacade : IPluginContext, IContext
     public T Get<T>(string serviceName)
     {
         NotifyRead(serviceName);
-        return _services.Get<T>(serviceName);
+        return Resolve<T>(serviceName)
+            ?? throw new Keystone.Core.Errors.KeystoneException(
+                Keystone.Core.Errors.ErrorCode.GatingServiceNotFound,
+                $"service '{serviceName}' is not provided in scope chain of '{Name}'");
     }
 
     public T? TryGet<T>(string serviceName)
     {
         NotifyRead(serviceName);
-        return _services.TryGet<T>(serviceName);
+        return Resolve<T>(serviceName);
+    }
+
+    /// <summary>
+    /// 服务解析链（03 §2 作用域链 / ADR-0007 依赖门控）：先查本 scope，再沿父链向上（→ 根）。
+    /// 父链 = 服务级组合（inject 跨插件可见）；isolate 隔离经独立 context 链天然达成（不共享父）。
+    /// </summary>
+    private T? Resolve<T>(string serviceName)
+    {
+        for (IContext? scope = this; scope is not null; scope = scope.Parent)
+        {
+            if (scope is ContextFacade facade && facade._services.TryGet<T>(serviceName) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return default;
     }
 
     public void Provide<T>(string serviceName, T instance)
     {
         NotifyWrite(serviceName, instance);
+
+        // 03 §2.1 组合语义：插件（子 scope）服务注册到公共祖先（root），兄弟插件经父链可见；
+        // 隔离实例（独立 root / isolate）服务留在本地，互不可见（03 §2.2）。
+        if (Parent is not null && Root is ContextFacade root)
+        {
+            root._services.Set(serviceName, instance, ownerId: Name);
+            return;
+        }
+
         _services.Set(serviceName, instance, ownerId: Name);
     }
 
