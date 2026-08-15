@@ -60,6 +60,7 @@ created: 2026-08-15
 | P30 差距 G-C7 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 日志导出器抽象（§7.30：ILogSink + Console sink，228/228 全绿） | §7.30 |
 | P31 差距 G-C8 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 热更新 API（§7.31：ReloadPlugin/UpdatePlugin，231/231 全绿） | §7.31 |
 | P32 差距 G-C11 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 日志级别默认阈值（§7.32：三级过滤对齐 Cordis levels，236/236 全绿） | §7.32 |
+| P33 多实例集成 | ✔ 验证通过 | 2026-08-15 | 2026-08-15 | — | 宿主级多实例集成测试（§7.33：插件组多实例并行/隔离/管道独立/TaskId/事件，237/237 全绿） | §7.33 |
 | P3 服务与生命周期 | ⏳ | | | M3 | | §7.3 |
 | P4 管道执行 | ⏳ | | | M4 | | §7.4 |
 | P5 插件加载 | ⏳ | | | M5 | | §7.5 |
@@ -566,6 +567,15 @@ created: 2026-08-15
 | 2026-08-15 | W32-01 | RingBufferLoggerProvider 三级级别过滤：`defaultLevel` 参数 + IsEnabled 判定（override → defaultLevel → Information） | 实现（TDD） | G-C11；logger.ts:155 | `src/Keystone.Runtime/Logging/RingBufferLoggerProvider.cs` | `LogLevelThresholdTests`（5） | ✅ |
 | 2026-08-15 | W32-02 | 全量回归 236/236 + Runtime AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
 
+### 7.33 P33 宿主级多实例集成测试
+
+> 01 §4 多实例模型兑现：同一插件组 spawn 多个能力域实例，各自独立 context/管道、并行处理不同任务。此前仅 Runtime 层单测验证隔离，宿主级完整链路缺失。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-15 | W33-01 | 多实例集成测试：calc 插件组（业务）+ observer（事件观察）+ audit-mw（管道中间件）——宿主启动后 spawn 3 实例并行处理不同任务（add/mul/sub），验证多实例隔离（独立结果）/管道每实例独立（before/after）/TaskId 贯穿/事件观察（共享总线 ID-08） | 测试（集成） | 01 §4；03 §2.2 | `tests/Keystone.Hosting.Tests/MultiInstanceIntegrationTests.cs` | 1 集成用例绿（3 次连跑稳定） | ✅ |
+| 2026-08-15 | W33-02 | 全量回归 237/237 + Hosting AOT 零 IL 警告 | 验收 | 规则 0 | — | `dotnet test` + `PublishAot=true` | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -654,6 +664,7 @@ created: 2026-08-15
 | ID-27 | G-C8 | `Keystone.Hosting/KeystoneHost.cs` | W31-01~03 |
 | W32-01 | ID-28 | `Logging/RingBufferLoggerProvider.cs` | `LogLevelThresholdTests`（5） |
 | ID-28 | G-C11 | `Logging/`（级别过滤） | W32-01~02 |
+| W33-01 | 01 §4 | `tests/Keystone.Hosting.Tests/MultiInstanceIntegrationTests.cs` | 集成用例绿 |
 
 ## 9. 维护规则
 
