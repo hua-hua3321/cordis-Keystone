@@ -5,7 +5,7 @@
 
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dot.net/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/your-org/cordis-csharp/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/cordis-csharp/actions/workflows/ci.yml)
+[![CI](https://github.com/hua-hua3321/cordis-csharp/actions/workflows/ci.yml/badge.svg)](https://github.com/hua-hua3321/cordis-csharp/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-architecture-blue)](docs/architecture/)
 
 **Keystone** is a universal, configuration-driven plugin framework for .NET — a

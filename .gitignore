@@ -4,6 +4,10 @@
 .nuget/
 *.user
 
+# ───── Local agent/tool state (never publish) ─────
+.workbuddy/
+.hermes/
+
 # ───── Visual Studio / VS Code / Rider ─────
 .vs/
 .idea/
@@ -12,6 +16,7 @@
 *~
 .vscode/launch.json
 .vscode/tasks.json
+.vscode/mcp.json
 *.DotSettings
 *.DotSettings.user
 

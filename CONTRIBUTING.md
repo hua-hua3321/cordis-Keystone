@@ -27,7 +27,7 @@
 **获取代码**
 
 ```bash
-git clone https://github.com/<your-org>/cordis-csharp.git
+git clone https://github.com/hua-hua3321/cordis-csharp.git
 cd cordis-csharp
 dotnet restore cordis-csharp.slnx
 ```
