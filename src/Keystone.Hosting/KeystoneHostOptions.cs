@@ -11,9 +11,11 @@ public sealed class KeystoneHostOptions
     /// <summary>观测性（P70/ADR-0018 L3：Console 默认开 / OTLP 可选 / 采样率 / 慢请求阈值）。</summary>
     public ObservabilityOptions Observability { get; set; } = new();
 
-    /// <summary>框架级可调值（P71-T1 硬编码审计：DependencyWaitTimeout/QuiesceTimeout 贯穿到
-    /// PluginRuntime）。嵌入方可直接赋值，或经 <c>KeystoneSettings.Bind(configuration)</c>
-    /// 从 keystone 配置节绑定后赋值（ADR-0013：配置存在时以配置为准）。</summary>
+    /// <summary>框架级可调值（P71-T1 接线 + P72-T2 冻结契约）：DependencyWaitTimeout/QuiesceTimeout
+    /// 贯穿到 PluginRuntime。嵌入方可直接赋值，或经 <c>KeystoneSettings.Bind(configuration)</c>
+    /// 从 keystone 配置节绑定后赋值（ADR-0013：配置存在时以配置为准）。
+    /// **契约：StartAsync 时快照一次，启动后修改本属性不影响已加载/后续加载的插件**
+    ///（框架配置启动后不可变；插件自身配置的实时变化走 ApplyConfigAsync/UpdatePluginAsync 热管线）。</summary>
     public Keystone.Core.KeystoneSettings FrameworkSettings { get; set; } = new();
 
     /// <summary>文件监听防抖窗口（P71-T2：config/plugin watcher 各自可调，默认 100ms）。</summary>

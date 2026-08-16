@@ -30,6 +30,10 @@ public sealed class KeystoneHost : IAsyncDisposable
     private readonly List<Func<PatchContextEventArgs, Func<Task>, Task>> _patchContextHandlers = [];
     private readonly HashSet<string> _failedEntries = new(StringComparer.Ordinal);
     private ContextFacade? _rootContext;
+    /// <summary>P72-T2：框架配置启动快照（契约：FrameworkSettings 启动后不可变——
+    /// 启动后嵌入方修改 options 不影响任何后续加载；null = 未启动，回退活 options）。</summary>
+    private Keystone.Core.KeystoneSettings? _frameworkSettingsAtStart;
+
     private Keystone.Config.Persistence.ConfigFileWriter? _configWriter; // DC-15：CRUD 落盘写回
     private Keystone.Runtime.Persistence.FactRetentionScheduler? _retention; // DC-18：定时 Prune
     private ConfigFileWatcher? _configWatcher; // DC-9：配置文件监听
@@ -137,6 +141,16 @@ public sealed class KeystoneHost : IAsyncDisposable
         return StartAsync([configYaml]);
     }
 
+    /// <summary>分层解析（08 §4）：逐层解析（DC-8 插值按层展开）→ 叠加 → 读后 patch（CA-5：校验前）。</summary>
+    private IReadOnlyList<Keystone.Config.Entries.EntryOptions> ParseLayeredEntries(IReadOnlyList<string> layerYamls)
+    {
+        var interpolator = BuildInterpolator();
+        var layers = layerYamls
+            .Select(layer => Keystone.Config.Entries.EntryParser.Parse(layer, interpolator))
+            .ToList();
+        return ApplyConfigPatches(Keystone.Config.Entries.EntryTree.ApplyLayers(layers));
+    }
+
     /// <summary>
     /// 分层启动（DC-7，08 §4）：多 YAML 层按序叠加（base → profile → 用户 patch → 运行期 overlay）——
     /// patch 按 id 合并（提供的字段覆盖、未提供保留）、显式 insert 插入、层内重复 id fail-fast；
@@ -150,16 +164,11 @@ public sealed class KeystoneHost : IAsyncDisposable
             throw new KeystoneException(ErrorCode.ConfigValidationFailed, "at least one config layer is required");
         }
 
+        _frameworkSettingsAtStart = _options.FrameworkSettings; // P72-T2：框架配置定格（启动后不可变契约）
         ConfigureObservability(); // P70-T2：OTel provider 先于一切——启动期 span 也在导出面
 
-        // 1. 配置层：逐层解析（DC-8 插值按层展开）→ 分层叠加（08 §4）
-        var interpolator = BuildInterpolator();
-        var layers = layerYamls
-            .Select(layer => EntryParser.Parse(layer, interpolator))
-            .ToList();
-        var entries = EntryTree.ApplyLayers(layers);
-
-        entries = ApplyConfigPatches(entries); // CA-5：读后 patch（校验前）
+        // 1. 配置层：逐层解析（DC-8 插值按层展开）→ 分层叠加（08 §4）→ 读后 patch（CA-5）
+        var entries = ParseLayeredEntries(layerYamls);
 
         _tree.Clear();
         _tree.AddRange(entries);
@@ -504,6 +513,10 @@ public sealed class KeystoneHost : IAsyncDisposable
         return current;
     }
 
+    /// <summary>框架配置生效值（P72-T2：启动快照优先；未启动回退活 options）。</summary>
+    private Keystone.Core.KeystoneSettings FrameworkSettingsEffective
+        => _frameworkSettingsAtStart ?? _options.FrameworkSettings;
+
     /// <summary>当前生效配置树（对齐 harness --dump-config）。</summary>
     public IReadOnlyList<EntryOptions> DumpConfig() => [.. _tree];
 
@@ -535,8 +548,8 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         var loader = await PluginLoader.CreateAsync(
             source, manifest, _discovery, id => new ContextFacade(id, _rootContext),
-            quiesceTimeout: _options.FrameworkSettings.QuiesceTimeout,
-            dependencyTimeout: _options.FrameworkSettings.DependencyWaitTimeout).ConfigureAwait(false);
+            quiesceTimeout: FrameworkSettingsEffective.QuiesceTimeout,
+            dependencyTimeout: FrameworkSettingsEffective.DependencyWaitTimeout).ConfigureAwait(false);
         _plugins.Add(new HostedPlugin(manifest.Id, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(new EntryOptions { Id = manifest.Id, Name = source.Id }));
     }
@@ -573,8 +586,8 @@ public sealed class KeystoneHost : IAsyncDisposable
         var isolateMap = BuildIsolateMap(id);
         var loader = await PluginLoader.CreateAsync(
             source, manifest, _discovery, ctxId => new ContextFacade(ctxId, _rootContext, isolateMap: isolateMap), config, isolateMap,
-            quiesceTimeout: _options.FrameworkSettings.QuiesceTimeout,
-            dependencyTimeout: _options.FrameworkSettings.DependencyWaitTimeout).ConfigureAwait(false);
+            quiesceTimeout: FrameworkSettingsEffective.QuiesceTimeout,
+            dependencyTimeout: FrameworkSettingsEffective.DependencyWaitTimeout).ConfigureAwait(false);
 
         _plugins.Add(new HostedPlugin(id, loader));
         // P70-T4（ADR-0018 L1）：冷重启计数（重编译 + 换 ALC 通道）
@@ -610,18 +623,27 @@ public sealed class KeystoneHost : IAsyncDisposable
 
     /// <summary>
     /// D-1（19 号审计 LD-6）：config-only 原地重启——同 ALC 新实例（不重编译/不换 ALC/不碰源码）。
-    /// 未托管条目（disabled/未加载）只改树不动运行时。
+    /// 未托管条目：disabled（自身/祖先挂起）只改树不动运行时；从未托管成功的存活条目
+    ///（启动期校验/编译失败）重试全量加载（P72-T1，对齐 Cordis update() 非 ACTIVE re-arm）。
     /// </summary>
     private async Task UpdatePluginInPlaceAsync(string id)
     {
+        var entry = FindEntry(_tree, id)
+            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
         var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
         if (hosted is null)
         {
-            return; // 未托管：树已更新，运行时无动作（加载时取新 config）
+            // P72-T1（对齐 fiber.ts:726-733 update() 非 ACTIVE 路径）：从未托管成功的条目
+            //（启动期校验失败/编译失败）收到新配置 → 全量重试加载（Cordis re-arm：清错误重新激活）；
+            // disabled（自身或祖先挂起）保持只改树不动运行时——挂起语义优先
+            if (entry.Disabled != true && !IsAnyAncestorDisabled(id))
+            {
+                await LoadEntryAsync(entry).ConfigureAwait(false);
+            }
+
+            return;
         }
 
-        var entry = FindEntry(_tree, id)
-            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
         var config = await ResolvePluginConfigAsync(entry).ConfigureAwait(false)
             ?? new Dictionary<string, object?>(StringComparer.Ordinal); // null config = 空配置（与启动路径同语义）
 
@@ -1406,11 +1428,13 @@ public sealed class KeystoneHost : IAsyncDisposable
             return;
         }
 
+        _failedEntries.Remove(entry.Id!); // P72-T1：重试加载成功 → 恢复出口（GetPluginState 不再恒 Failed）
+
         var isolateMap = BuildIsolateMap(entry.Id!);
         var loader = await PluginLoader.CreateAsync(
             source, manifest, _discovery, id => new ContextFacade(id, _rootContext, isolateMap: isolateMap), config, isolateMap,
-            quiesceTimeout: _options.FrameworkSettings.QuiesceTimeout,
-            dependencyTimeout: _options.FrameworkSettings.DependencyWaitTimeout).ConfigureAwait(false);
+            quiesceTimeout: FrameworkSettingsEffective.QuiesceTimeout,
+            dependencyTimeout: FrameworkSettingsEffective.DependencyWaitTimeout).ConfigureAwait(false);
         _plugins.Add(new HostedPlugin(entry.Id!, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(entry)); // 统一加载入口（F9）
     }
