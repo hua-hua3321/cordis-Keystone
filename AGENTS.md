@@ -56,6 +56,7 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 | [architecture/15-decoupling-plan.md](architecture/15-decoupling-plan.md) | 解耦工作计划：第三方依赖耦合审计（C1-C8）+ 分阶段隔离计划（D1-D5） | 标准 |
 | [architecture/16-cordis-gap-review.md](architecture/16-cordis-gap-review.md) | Cordis 功能差距复核（实现后）：G-C1~C14 差距清单（配置注入/依赖恢复/值注销等）+ 建议计划 | 标准 |
 | [architecture/17-doc-compliance-audit.md](architecture/17-doc-compliance-audit.md) | 文档要求 vs 实现达成度审计：30 项差距（DC-1~20）+ 修复计划 | 标准 |
+| [architecture/18-cordis-code-parity-audit.md](architecture/18-cordis-code-parity-audit.md) | 实现后代码级对照审计：CA-1~18 差距 + 实现提案（待人工决策） | 标准 |
 | [decisions/](decisions/README.md) | 决策记录（ADR-0001 ~ 0015，设计期已收敛；实现期新决策走 14 §4 通道） | accepted |
 
 ## 治理
@@ -66,7 +67,7 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 
 ## 加工件说明（看板流水线使用）
 
-当前阶段：**实现期完成（M0-M13 全部通过）+ P14 MCP 协议层落地 + P15-P20 解耦完成 + P21 集成验收 + P22 接入 B3/B4 + P23-P32 Cordis 差距 9 项闭合 + P33 宿主级多实例集成 + P34-P37 文档达标 P0 高危 5 项（DC-1 持久 context / DC-3 quiesce / DC-6 rebind / DC-5 依赖超时 / DC-4 监督）+ P38-P50 静态插值/事实事件/管道 swap/分层叠加/disabled 挂起/日志命名/Trace 幂等/CRUD 落盘/manifest 校验/事件保留/获取端抽象/取消贯穿/文件热重载（DC-8/11/10/7/16/20/13/15/17/18/19/14/9，334 测试全绿）；**17 审计 30 项差距全部闭合（P0+P1+P2）****。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
+当前阶段：**实现期完成（M0-M13 全部通过）+ P14 MCP 协议层落地 + P15-P20 解耦完成 + P21 集成验收 + P22 接入 B3/B4 + P23-P32 Cordis 差距 9 项闭合 + P33 宿主级多实例集成 + P34-P37 文档达标 P0 高危 5 项（DC-1 持久 context / DC-3 quiesce / DC-6 rebind / DC-5 依赖超时 / DC-4 监督）+ P38-P50 静态插值/事实事件/管道 swap/分层叠加/disabled 挂起/日志命名/Trace 幂等/CRUD 落盘/manifest 校验/事件保留/获取端抽象/取消贯穿/文件热重载（DC-8/11/10/7/16/20/13/15/17/18/19/14/9，334 测试全绿）；**17 审计 30 项差距全部闭合（P0+P1+P2）+ P51 第二轮代码级对照审计（18 文档，CA-1~18 待人工决策）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
 
 - 构建：`dotnet build cordis-csharp.slnx`（已存在；警告即错误）
 - 测试：`dotnet test cordis-csharp.slnx`（已存在；334 个单测绿，M0-M13 全阶段 + P14-P50）
