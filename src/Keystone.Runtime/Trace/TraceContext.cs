@@ -40,6 +40,22 @@ public static class TraceContext
     public const string CapabilityTag = "keystone.capability";
     public const string OperationTag = "keystone.operation";
 
+    // P70-T4（ADR-0018 L1）：config/host 切片 span 名 + tag 键（Hosting 组合层接线使用）
+    public const string ConfigApplyActivityName = "keystone.config.apply";
+    public const string ConfigEntryActivityName = "keystone.config.entry";
+    public const string HotUpdateActivityName = "keystone.hotupdate";
+    public const string GroupTransactionActivityName = "keystone.group.transaction";
+
+    public const string EntryIdTag = "keystone.entry.id";
+    public const string ChannelTag = "keystone.channel";
+    public const string GroupTag = "keystone.group";
+    public const string OutcomeTag = "keystone.outcome";
+    public const string EntriesTag = "keystone.entries";
+    public const string FailuresTag = "keystone.failures";
+    public const string RolledBackTag = "keystone.rolled_back";
+    public const string OldKeysTag = "keystone.hotupdate.old_keys";
+    public const string NewKeysTag = "keystone.hotupdate.new_keys";
+
     /// <summary>供宿主/组合根引用的源（OTel AddSource 接线，ADR-0018 L3）。</summary>
     public static ActivitySource SourceForHosting => Source;
 

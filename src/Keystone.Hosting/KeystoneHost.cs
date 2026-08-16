@@ -85,8 +85,7 @@ public sealed class KeystoneHost : IAsyncDisposable
                     $"config file not found and no InitialEntries configured: {path}");
             }
 
-            _configWriter ??= new Keystone.Config.Persistence.ConfigFileWriter(path);
-            await _configWriter.EnsureInitialAsync(initial).ConfigureAwait(false); // 存在则跳过（幂等）
+            await EnsureConfigWriter().EnsureInitialAsync(initial).ConfigureAwait(false); // 存在则跳过（幂等）
         }
 
         var yaml = await File.ReadAllTextAsync(path).ConfigureAwait(false);
@@ -338,13 +337,29 @@ public sealed class KeystoneHost : IAsyncDisposable
             return; // CA-15：save=false 的事务内子操作不写回（防回环）
         }
 
-        _configWriter ??= new Keystone.Config.Persistence.ConfigFileWriter(_options.ConfigFilePath);
-        _configWriter.ScheduleWrite(DumpConfig());
+        EnsureConfigWriter().ScheduleWrite(DumpConfig());
     }
 
     /// <summary>冲刷写回队列（测试/嵌入方在关键点确保落盘）。</summary>
     public Task FlushConfigAsync()
         => _configWriter?.FlushAsync() ?? Task.CompletedTask;
+
+    /// <summary>
+    /// P70-T4（ADR-0018 L1/L3）：ConfigFileWriter 单例 + OnWriteFailed → writer.failures 计数
+    /// （防抖 Timer 丢弃路径失败经事件暴露——显式 FlushAsync/WriteAsync 调用失败仍直接上抛，
+    /// 与 P2-24 事件语义一致：计数只覆盖可观测的防抖失败面）。
+    /// </summary>
+    private Keystone.Config.Persistence.ConfigFileWriter EnsureConfigWriter()
+    {
+        if (_configWriter is null)
+        {
+            _configWriter = new Keystone.Config.Persistence.ConfigFileWriter(_options.ConfigFilePath!);
+            _configWriter.OnWriteFailed += (_, _) =>
+                Keystone.Runtime.Trace.KeystoneMeter.WriterFailures.Add(1);
+        }
+
+        return _configWriter;
+    }
 
     // ── Hosting API：条目 CRUD（F5）──
 
