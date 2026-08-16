@@ -65,9 +65,17 @@ public static class ConfigDiffer
         }
     }
 
-    /// <summary>结构键：冷重启判定的字段（08 §6.1：name/inject/group 变 → 冷重启）。</summary>
+    /// <summary>结构键：冷重启判定的字段（08 §6.1：name/inject/group 变 → 冷重启）。isolate 按名排序 + 档位编码（diff 稳定）。</summary>
     private static string StructuralKey(EntryOptions e)
-        => $"{e.Name}|{string.Join(",", e.Inject)}|{string.Join(",", e.Isolate)}";
+        => $"{e.Name}|{string.Join(",", e.Inject)}|{string.Join(",", e.Isolate.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(FormatIsolate))}";
+
+    private static string FormatIsolate(KeyValuePair<string, IsolateSpec> kv)
+        => kv.Value.Kind switch
+        {
+            IsolateKind.Private => $"{kv.Key}=true",
+            IsolateKind.Shared => $"{kv.Key}@{kv.Value.Label}",
+            _ => $"{kv.Key}=false",
+        };
 
     /// <summary>config 比对（引用相等短路；字典值逐键比——YAML 重读必是新实例）。</summary>
     private static bool ConfigEquals(object? oldConfig, object? newConfig)

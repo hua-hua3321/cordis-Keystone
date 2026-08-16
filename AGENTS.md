@@ -67,10 +67,10 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 
 ## 加工件说明（看板流水线使用）
 
-当前阶段：**实现期完成（M0-M13 全部通过）+ P14 MCP 协议层落地 + P15-P20 解耦完成 + P21 集成验收 + P22 接入 B3/B4 + P23-P32 Cordis 差距 9 项闭合 + P33 宿主级多实例集成 + P34-P37 文档达标 P0 高危 5 项（DC-1 持久 context / DC-3 quiesce / DC-6 rebind / DC-5 依赖超时 / DC-4 监督）+ P38-P50 静态插值/事实事件/管道 swap/分层叠加/disabled 挂起/日志命名/Trace 幂等/CRUD 落盘/manifest 校验/事件保留/获取端抽象/取消贯穿/文件热重载（DC-8/11/10/7/16/20/13/15/17/18/19/14/9，334 测试全绿）；**17 审计 30 项差距全部闭合（P0+P1+P2）+ P51-P53 第二轮代码级对照审计 + 逐项研判 + 决策批判复核 + P54-P56 CA-1 全决策裁定与可行性复核（默认域=共享 / schema=对齐 Cordis map 两档 / 抽象接缝=发现层"只读+通知"；CA-1 终稿待实施，CA-10 唯一 P0）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
+当前阶段：**实现期完成（M0-M13 全部通过）+ P14 MCP 协议层落地 + P15-P20 解耦完成 + P21 集成验收 + P22 接入 B3/B4 + P23-P32 Cordis 差距 9 项闭合 + P33 宿主级多实例集成 + P34-P37 文档达标 P0 高危 5 项（DC-1 持久 context / DC-3 quiesce / DC-6 rebind / DC-5 依赖超时 / DC-4 监督）+ P38-P50 静态插值/事实事件/管道 swap/分层叠加/disabled 挂起/日志命名/Trace 幂等/CRUD 落盘/manifest 校验/事件保留/获取端抽象/取消贯穿/文件热重载（DC-8/11/10/7/16/20/13/15/17/18/19/14/9，334 测试全绿）；**17 审计 30 项差距全部闭合（P0+P1+P2）+ P51-P53 第二轮代码级对照审计 + 逐项研判 + 决策批判复核 + P54-P56 CA-1 全决策裁定与可行性复核（默认域=共享 / schema=对齐 Cordis map 两档 / 抽象接缝=发现层"只读+通知"；CA-1 实施中 P57：T1 schema 对齐已落地，T2-T6 依次执行）**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
 
 - 构建：`dotnet build cordis-csharp.slnx`（已存在；警告即错误）
-- 测试：`dotnet test cordis-csharp.slnx`（已存在；334 个单测绿，M0-M13 全阶段 + P14-P50）
+- 测试：`dotnet test cordis-csharp.slnx`（已存在；345 个单测绿，M0-M13 全阶段 + P14-P50 + P57-T1）
 - **实现纪律（13 §6）**：TDD 测试先行（红→绿→重构）；设计模式 + 契约/错误/实现边界抽象隔离；跨层单向依赖
 - 文档校验：`cd ~/Projects/central-governance && python3 scripts/validate_frontmatter.py`
 - 设计文档改动必须同步：AGENTS.md 索引、docs/architecture/ 对应文档、decisions/ ADR

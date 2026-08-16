@@ -856,6 +856,28 @@ created: 2026-08-15
 | 2026-08-16 | W56-03 | 批量通知（对齐 Cordis `notify(names[])`）+ 实施序细化（schema+shim 零运行时涟漪先行独立提交） | 裁定 | ID-52 | 18 §2 第 1 步/实施序 | — | ✅ |
 | 2026-08-16 | W56-04 | 涟漪盘点：测试 19 refs/10 文件；EntryTree 合并触点（EntryTree.cs:55 `Isolate.Count>0` 三元）确认；AGENTS 状态行清欠（P54/P55 漏更） | 盘点 | R10 | AGENTS.md | frontmatter 校验通过；334/334 保持全绿 | ✅ |
 
+### 7.57 P57 CA-1 实施（TDD 依次执行）
+
+> 目标：按 18 §2 CA-1 终稿（P54-P56 全裁定）落地 isolate 服务隔离。任务 T1-T6，每任务 TDD 红→绿→重构 + 全量回归 + AOT 冒烟 + 文档回写 + 独立提交，完成后对照验收标准逐项验收。
+
+| 任务 | 目标（严禁简化） | 影响范围 | 验收标准 | 状态 |
+|------|----------------|---------|---------|------|
+| T1 schema 对齐 | isolate 改 Dict<name→true\|"label"> 两档（IsolateKind 三态含 None=显式解除）+ 列表 shim + 序列化 map 回写 + 分层按名合并（None 移除）+ ConfigDiffer 结构键档位编码 + fail-fast | Keystone.Config（EntryOptions/EntryParser/EntrySerializer/EntryTree）+ Keystone.Hosting（ConfigDiffer）+ 08 §3 文档 | 11 个新测试红→绿（map 两档/shim/None/非法形态 fail-fast/roundtrip/按名合并+false 移除/Shared 工厂校验）；全量回归全绿；AOT 0 IL；08 §3 更新；独立提交 | ✔ 2026-08-16 |
+| T2 KeyedServiceStore | ConcurrentDictionary<(name,realm),(value,ownerId)> + Lock 复合写（属主校验+写）+ **出锁批量通知**（names[] 合并）+ IsAvailable=ContainsKey + Provide 返回删键 disposer | Keystone.Runtime/Context 新增组件（纯新增不接线） | 并发测试：跨属主拒绝/同属主重绑/删键属主校验；订阅者回调内再查 store 不死锁（出锁证明）；批量合并语义；全绿；AOT；提交 | ⏳ |
+| T3 ContextFacade 接线 | facade 持共享 root store；realm 沿链推导（""/#groupId/@label）；Resolve 算 realm 查共享 store；Provide 带 realm + effect disposer；RemoveOwnedServices 走 owned 集 | ContextFacade/IServiceStore + Runtime.Tests（10 文件 19 refs） | 隔离语义测试（同 label 共享/私有互不可见/默认共享回落）；GetLazy 不回归；卸载后 store 干净；全绿；AOT；提交 | ⏳ |
+| T4 发现投影+门控统一 | IServiceRegistry→IServiceDiscovery 只读投影（IsAvailable(name,realm)+Subscribe）；PluginRuntime 删双注册；门控带 realm；init 后校验 provides⊆owned | ServiceRegistry/IServiceRegistry/PluginRuntime/PluginLoader/KeystoneHost + Runtime/Hosting 测试 | 门控/依赖恢复（G-C2）/DC-5 诊断全绿；provides 未 Provide → 明确 FAILED；全绿；AOT；提交 | ⏳ |
+| T5 宿主端到端 | 三 context 工厂按 entry.Isolate 算 realm；组谱系 #groupId 推导；isolate 变更触发依赖方重载（F10） | KeystoneHost + Hosting.Tests | e2e：同 label 共享/私有隔离/默认共享；配置改 isolate → 受影响条目重载；全绿；AOT；提交 | ⏳ |
+| T6 总验收 | 全量回归 + 六工程 AOT + 文档回写（02/03/08/09/10/11/14/18/AGENTS）+ CA-1 标记已实施 | 全仓 | 345+N 全绿；AOT 全零 IL；文档同步；frontmatter；最终提交 | ⏳ |
+
+#### T1 执行记录（2026-08-16）
+
+| 编号 | 工作项 | 类型 | 验收凭证 | 结果 |
+|------|--------|------|---------|------|
+| W57-T1-01 | 红测试 11 个（IsolateSchemaTests：map 两档/shim/None/3 种非法形态 fail-fast/默认空/roundtrip/按名合并+false 移除/Shared 工厂空白校验） | TDD | 编译期红（CS0103/CS0021） | ✅ |
+| W57-T1-02 | IsolateKind（独立文件，MA0048）+ IsolateSpec（readonly record struct，Private/Shared/None 工厂 + ToString 与 YAML 标量一致） | 实现 | — | ✅ |
+| W57-T1-03 | EntryOptions.Isolate → IReadOnlyDictionary<string,IsolateSpec>；EntryParser.ParseIsolate（map+列表 shim+严格 fail-fast）；EntrySerializer map 形态按键序回写；EntryTree.MergeIsolate 按名合并（None 移除）；ConfigDiffer 结构键档位编码（name=true/@label/=false） | 实现 | — | ✅ |
+| W57-T1-04 | 全量回归 345/345（Config 58→69，新增 11）；AOT 冒烟 Config+Hosting 双零 IL；08 §3 示例+字段表更新；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。

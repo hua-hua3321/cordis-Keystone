@@ -21,8 +21,15 @@ public sealed record EntryOptions
     /// <summary>条目级依赖声明（与 manifest inject 并集合并，F2）。</summary>
     public IReadOnlyList<string> Inject { get; init; } = [];
 
-    /// <summary>组级服务隔离（03 §2.2）。</summary>
-    public IReadOnlySet<string> Isolate { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+    /// <summary>
+    /// 服务隔离声明（03 §2.2；18 §2 CA-1）：Dict&lt;服务名 → 两档域&gt;（对齐 Cordis）——
+    /// Private=条目私有域（#entryId）/ Shared(label)=命名共享域（@label）/ None=显式解除（分层补丁撤销）。
+    /// 列表写法 <c>isolate: [fs]</c> 经解析 shim 等价展开为全 Private。
+    /// </summary>
+    public IReadOnlyDictionary<string, IsolateSpec> Isolate { get; init; } = EmptyIsolate;
+
+    private static readonly IReadOnlyDictionary<string, IsolateSpec> EmptyIsolate =
+        new Dictionary<string, IsolateSpec>(StringComparer.Ordinal);
 
     /// <summary>嵌套条目组（组级事务单元，F4）。</summary>
     public IReadOnlyList<EntryOptions>? Group { get; init; }

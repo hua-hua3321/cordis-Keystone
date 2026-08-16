@@ -53,9 +53,43 @@ public static class EntryTree
                     Config = candidate.Config ?? existing.Config,
                     Disabled = candidate.Disabled ?? existing.Disabled,
                     Inject = candidate.Inject.Count > 0 ? candidate.Inject : existing.Inject,
-                    Isolate = candidate.Isolate.Count > 0 ? candidate.Isolate : existing.Isolate,
+                    Isolate = MergeIsolate(existing.Isolate, candidate.Isolate),
                     Group = candidate.Group ?? existing.Group,
                 };
+            }
+        }
+
+        return merged;
+    }
+
+    /// <summary>
+    /// isolate 按名合并（map 语义，18 §2 CA-1）：candidate 条目覆盖同名底层声明；
+    /// None（false）= 显式解除 → 移除；未提及的名字保留底层值。非整体替换（与 Inject 的整体覆盖不同）。
+    /// </summary>
+    private static IReadOnlyDictionary<string, IsolateSpec> MergeIsolate(
+        IReadOnlyDictionary<string, IsolateSpec> existing,
+        IReadOnlyDictionary<string, IsolateSpec> candidate)
+    {
+        if (candidate.Count == 0)
+        {
+            return existing;
+        }
+
+        if (existing.Count == 0)
+        {
+            return candidate;
+        }
+
+        var merged = new Dictionary<string, IsolateSpec>(existing, StringComparer.Ordinal);
+        foreach (var (name, spec) in candidate)
+        {
+            if (spec.Kind == IsolateKind.None)
+            {
+                merged.Remove(name);
+            }
+            else
+            {
+                merged[name] = spec;
             }
         }
 

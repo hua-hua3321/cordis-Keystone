@@ -54,8 +54,10 @@ plugins/
   group:                 # 组嵌套：一组条目作为单元加载/卸载
     - id: auth
       name: ./plugins/auth
-  isolate:               # 组级服务隔离：该组内服务名独立实例
-    - fs
+  isolate:               # 服务隔离声明（18 §2 CA-1：map 两档，对齐 Cordis Dict<name → true|"label">）
+    fs: true              # true = 条目私有域（realm #entryId）
+    cache: shared-a       # "label" = 命名共享域（realm @label，同 label 共享）
+  # 旧列表写法 isolate: [fs] 经 shim 等价展开为全私有（fs: true）
 ```
 
 | 字段 | 语义 | 对应 Cordis |
@@ -66,7 +68,7 @@ plugins/
 | `disabled` | 挂起不删，改回即恢复（依赖它的 PENDING 插件随之加载）；**父组 disabled → 子树全部挂起**（组自身永不被挂起） | loader disabled（含继承） |
 | `inject` | 条目级依赖声明，与 manifest `inject` **并集合并**（同名冲突以条目级为准，实现期验证）后参与 ADR-0007 门控 | loader entry inject |
 | `group` | 嵌套条目组，单元加载/卸载 | plugin-group |
-| `isolate` | 组内指定服务名独立 scope | group isolate |
+| `isolate` | 服务隔离 map 两档：`{名: true}` 私有域 / `{名: "label"}` 命名共享域 / `{名: false}` 显式解除（分层补丁撤销底层声明，合并按名移除）；列表写法 shim ≡ 全私有 | loader isolate（Dict 两档） |
 
 > **表达式边界**（ADR-0011 + ADR-0012）：Cordis 的 `!!js` 配置表达式**求值**（任意代码 eval）不纳入——配置不写代码；但 YamlDotNet 自定义 tag 机制**保留**，承载加载期静态插值：`!!env NAME`（环境变量替换）、`!!file path`（文件内容引入）、anchors/merge keys（YamlDotNet 内建）。运行期状态条件（"服务 X 不存在才禁用"）由 ADR-0007 依赖门控表达（服务缺失 → 依赖方 PENDING），不需要配置里写逻辑。
 

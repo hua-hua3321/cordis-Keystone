@@ -34,7 +34,10 @@ public class EntryParserTests
 
         var entry = Assert.Single(entries);
         Assert.Equal(["llm", "telemetry"], entry.Inject);
-        Assert.Equal(["fs"], entry.Isolate);
+        // 列表 shim ≡ 全私有（18 §2 CA-1 第 0 步）
+        var isolate = Assert.Single(entry.Isolate);
+        Assert.Equal("fs", isolate.Key);
+        Assert.Equal(IsolateKind.Private, isolate.Value.Kind);
     }
 
     [Fact]

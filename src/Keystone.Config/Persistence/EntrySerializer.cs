@@ -38,7 +38,12 @@ public static class EntrySerializer
 
         if (entry.Isolate.Count > 0)
         {
-            sb.AppendLine(CultureInfo.InvariantCulture, $"{pad}  isolate: [{string.Join(", ", entry.Isolate)}]");
+            // map 形态回写（18 §2 CA-1）：name: true|false|label，按键序确定输出（diff 稳定）
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{pad}  isolate:");
+            foreach (var (name, spec) in entry.Isolate.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture, $"{pad}    {name}: {spec}");
+            }
         }
 
         if (entry.Group is not null)
