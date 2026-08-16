@@ -81,6 +81,8 @@ status: standard
 | P2-26 (IN-6) | CA-6 写失败错误面 | StartFromFileAsync | initial 写失败裸 FileNotFoundException（应包 KeystoneException 语义） |
 | P2-27 (IN-7) | ConfigUpdate 事件面不一致 | KeystoneHost NotifyConfigUpdate 调用点 | 纯内存模式（无 ConfigFilePath）下 Create/Update 不触发、Remove 触发——面不齐 |
 | P2-28 (IN-8) | EntrySerializer 回写失真 | EntrySerializer.cs:74-91 | list 形状回写：重复键/无引号/塌缩——建议补序列与引号保真 |
+| P2-29 (EV-13) | emit 仅收同步 Action | ContextFacade.cs:155-168 vs events.ts | Cordis fire-and-forget 异步监听无对应（.NET 侧需 SubscribeParallel）；注记或补 async 重载 |
+| P2-30 (EV-14) | 决策默认值 undefined vs null | EventBus vs events.ts | Cordis 未决策=undefined；Keystone=null——类型系统差异，注记即可 |
 
 ## 5. verified 凭证（对抗验证通过，择要）
 
