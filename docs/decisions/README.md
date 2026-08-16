@@ -24,6 +24,7 @@ created: 2026-08-15
 | [adr-0012-yaml-static-interpolation.md](adr-0012-yaml-static-interpolation.md) | 保留 YAML 自定义 tag 做静态插值（!!env/!!file，解析≠求值边界澄清，补充 ADR-0011） | accepted | 2026-08-15 |
 | [adr-0013-config-provider-abstraction.md](adr-0013-config-provider-abstraction.md) | 配置提供者抽象（Keystone.Config）：M.E.C IConfigurationSource 契约 + 默认 YAML/AgileConfig 双源 + 禁止硬编码 | accepted | 2026-08-15 |
 | [adr-0015-proto-actor-aot-exception.md](adr-0015-proto-actor-aot-exception.md) | Proto.Actor 保留 + 库自身 AOT 警告例外（规则 0 第二处例外） | accepted | 2026-08-15 |
+| [adr-0016-config-format-yaml-only.md](adr-0016-config-format-yaml-only.md) | 配置格式收敛 YAML-only，弃用 JSON（CA-8；插值互斥 + IConfigProvider 后门） | accepted | 2026-08-16 |
 | [adr-0014-config-yaml-only-p0.md](adr-0014-config-yaml-only-p0.md) | 开发阶段配置源收敛为 YAML（配置中心延后启用，AgileConfig 降为预留可选源，收敛 ADR-0013） | accepted | 2026-08-15 |
 
 ## 约定

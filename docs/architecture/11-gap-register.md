@@ -94,29 +94,30 @@ created: 2026-08-15
 
 ### 3.3 代码级复查项（CA 系列，实现后第二轮，来源 18）
 
-> 2026-08-16 第二轮代码级审计（18-cordis-code-parity-audit）；同日 P52 **逐项二次研判**（完整读码替代抽样 grep）：CA-9 判定误报降级（effect 挂接已存在）、CA-1 缺口收窄（机制已有，缺配置接线+门控域）、CA-10 确认为唯一 P0 正确性。A 类 12 + B 类 6 ≈ 18%；**全部待人工决策**（18 §2/§3 含 v2 解决方案，§5 决策矩阵）。
+> 2026-08-16 第二轮代码级审计（18-cordis-code-parity-audit）；同日 P52 **逐项二次研判**（完整读码替代抽样 grep）：CA-9 判定误报降级（effect 挂接已存在）、CA-1 缺口收窄（机制已有，缺配置接线+门控域）、CA-10 确认为唯一 P0 正确性。A 类 12 + B 类 6 ≈ 18%。**P57-P63 已全部收敛**：11 项实施（14 log §7.57-§7.62）+ CA-8 弃用（ADR-0016）+ CA-11 保留扩展点 + CA-13 场景驱动延后 + CA-14/16/17/18 接受差异（12 §11.1 注记）。
 
 | # | 差距 | 状态 | 落点 | 备注 |
 |---|------|------|------|------|
-| CA-9 | ~~计时器不随卸载回收~~（**初判误报**，P52 复核降级）→ 残留 CTS dispose 竞态 + 在途回调不收敛两个加固点 | ⚠️ 待决策（降级 P2 加固） | 18 §2 | effect 挂接已存在（ctx.Context.Effect + quiesce 收敛）；初版 grep 模式漏检 |
-| CA-10 | 组 CRUD 不级联（删组留孤儿运行插件/建组不加载子树） | ⚠️ 待决策（**唯一 P0 正确性**） | 18 §2 | DisposeHostedAsync 抽取 + 逆序逐叶 + EnumerateActiveLeaves 加载 |
-| CA-1 | isolate：schema 分叉 + 配置接线 + 门控域感知 | ⚠️ 待实施（P1，**全部裁定**） | 18 §2 | P54 默认域=共享；P55 schema=对齐 Cordis map 两档 + 抽象接缝=发现层（值层内存不可分布/发现层 IServiceDiscovery 可交换）；实施序 1+2 先行 |
-| CA-3 | 组级事务（并行应用+聚合+逆序回滚） | ⚠️ 待决策（建议 P1 实施） | 18 §2/§5.1 | 08 §6.2 已设计未实现；并行改拓扑分层（规避 DC-5 门控超时） |
-| CA-4 | EntryTree.update 组合语义（config+移动+position） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | 新 UpdateEntryAsync |
-| CA-6 | initial 引导（EnsureInitialAsync 死代码） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | InitialEntries 选项接线 |
-| CA-12 | 服务级配置合并链（intercept 对应物） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | DC-20 剩余收口；ServiceOptions + 日志首例 |
-| CA-2 | 插件源文件 watcher | ⚠️ 待决策（建议 P2 实施） | 18 §2 | ReloadPluginAsync 已具备，缺触发器 |
-| CA-5 | 运行期 patch 注入（Config.patches） | ⚠️ 待决策（建议 P2 实施） | 18 §2 | EntryPatcher 纯函数 |
-| CA-7 | 配置写 readonly 优雅降级 | ⚠️ 待决策（建议 P2 实施） | 18 §2 | 08 §6.3 承诺 |
-| CA-15 | update noSave 参数 | ⚠️ 待决策（建议 P2 实施） | 18 §3 | 防 watcher 回环写 |
-| CA-13 | 依赖换实例重载（epoch uid） | ⚠️ 待决策（P2 增强） | 18 §3 | RebindPolicy 选项形态 |
-| CA-8 | JSON 配置格式 | ⚠️ 待决策（建议弃用） | 18 §2 | 与 !!env 插值冲突；ADR-0014 范围 |
-| CA-11 | `cordis:` 内建前缀 | ⚠️ 待决策（建议弃用） | 18 §2 | 内建 = 宿主组合根直接构造 |
-| CA-14/16/17/18 | await 抛错/listener·dispatch 事件/写队列粒度/Service 基族 | ⚠️ 待决策（建议接受差异） | 18 §3 | 12 §补注记 |
+| CA-9 | ~~计时器不随卸载回收~~（**初判误报**，P52 复核降级）→ 残留 CTS dispose 竞态 + 在途回调不收敛两个加固点 | ✅ 已实施（P61-T1） | 14 §7.61 | effect 挂接已存在（ctx.Context.Effect + quiesce 收敛）；初版 grep 模式漏检 |
+| CA-10 | 组 CRUD 不级联（删组留孤儿运行插件/建组不加载子树） | ✅ 已实施（P58，唯一 P0） | 14 §7.58 | DisposeHostedAsync 抽取 + 逆序逐叶 + EnumerateActiveLeaves 加载 |
+| CA-1 | isolate：schema 分叉 + 配置接线 + 门控域感知 | ✅ 已实施（P57 T1-T6） | 14 §7.57 | P54 默认域=共享；P55 schema=对齐 Cordis map 两档 + 抽象接缝=发现层（值层内存不可分布/发现层 IServiceDiscovery 可交换）；实施序 1+2 先行 |
+| CA-3 | 组级事务（并行应用+聚合+逆序回滚） | ✅ 已实施（P59-T1） | 14 §7.59 | 08 §6.2 已设计未实现；并行改拓扑分层（规避 DC-5 门控超时） |
+| CA-4 | EntryTree.update 组合语义（config+移动+position） | ✅ 已实施（P59-T2） | 14 §7.59 | 新 UpdateEntryAsync |
+| CA-6 | initial 引导（EnsureInitialAsync 死代码） | ✅ 已实施（P60-T1） | 14 §7.60 | InitialEntries 选项接线 |
+| CA-12 | 服务级配置合并链（intercept 对应物） | ✅ 已实施（P60-T2） | 14 §7.60 | DC-20 剩余收口；ServiceOptions + 日志首例 |
+| CA-2 | 插件源文件 watcher | ✅ 已实施（P62） | 14 §7.62 | ReloadPluginAsync 已具备，缺触发器 |
+| CA-5 | 运行期 patch 注入（Config.patches） | ✅ 已实施（P61-T4） | 14 §7.61 | EntryPatcher 纯函数 |
+| CA-7 | 配置写 readonly 优雅降级 | ✅ 已实施（P61-T2） | 14 §7.61 | 08 §6.3 承诺 |
+| CA-15 | update noSave 参数 | ✅ 已实施（P61-T3） | 14 §7.61 | 防 watcher 回环写 |
+| CA-13 | 依赖换实例重载（epoch uid） | ⏸ 场景驱动延后（P53 复核维持；蓝绿存活替换出现再做，用 ServiceChanged 非 owner 比对） | 18 §3/§5.1 | RebindPolicy 选项形态 |
+| CA-8 | JSON 配置格式 | ✅ 已决策弃用（ADR-0016，P63 人工裁定） | ADR-0016 | 与 !!env 插值冲突；ADR-0014 范围 |
+| CA-11 | `cordis:` 内建前缀 | ⏸ 保留为扩展点（P63 人工裁定；内建 = 宿主组合根直接构造） | 18 §2 | 内建 = 宿主组合根直接构造 |
+| CA-14/16/18 | await 抛错/listener·dispatch 事件/Service 基族 | ✅ 接受差异（12 §11.1 注记，P63） | 12 §11.1 |
+| CA-17 | 写队列粒度（applyQueue 任务级 vs 自旋等待） | ✅ 接受差异 + 挂观察 | 18 §3 + 本表 §4.1 | 12 §补注记 |
 
 ## 4. 当前开放项
 
-**无 ❌ 开放项**——G1-G16 与全部补充排查项均已收敛、显式弃用或委托。**CA 系列（§3.3，18 项）为 2026-08-16 代码级审计新增，全部 ⚠️ 待人工决策——这是当前唯一的开放批次**。历史残留跟踪点：
+**无 ❌ 开放项**——G1-G16 与全部补充排查项均已收敛、显式弃用或委托。**CA 系列（§3.3，18 项）已全部收敛（P57-P63）：11 项已实施、CA-8 弃用（ADR-0016）、CA-11 保留扩展点、CA-13 场景驱动延后、CA-14/16/17/18 接受差异**。历史残留跟踪点：
 
 | 项 | 性质 | 实现期动作 |
 |----|------|-----------|
@@ -124,6 +125,12 @@ created: 2026-08-15
 | O2 TaskId 映射 | ✅ 已验证（P12） | WorkflowBridge fan-out/fan-in TaskId/ParentTaskId 贯穿测试（ADR-0008 不回退项闭合） |
 | 事件格式迁移 | 实现期 | ADR-0009 风险表：StoredFact.SchemaVersion 迁移策略 |
 | （H2/H3/M1/M3 已随 P2/P6/P7 落地闭合，见 §3.1） | ✅ | — |
+
+### 4.1 观察项（CA-17，18 §3 决策"接受差异 + 挂观察"）
+
+| 观察点 | 触发条件 | 备选方案（届时评估） |
+|--------|---------|---------------------|
+| `_applyingConfig` 自旋等待（10ms 轮询）在并发 CRUD 下的延迟/饿死 | 高并发编程式 CRUD（管理面 API 高频调用 + watcher 回环叠加）出现可观测延迟或饥饿 | 改 `Channel<Func<Task>>` 单消费泵（任务级串行，对齐 Cordis applyQueue enqueue 粒度） |
 
 ## 5. 跟踪纪律
 

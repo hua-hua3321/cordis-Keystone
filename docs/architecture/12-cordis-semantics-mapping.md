@@ -328,6 +328,18 @@ await next();   // 按序执行整条链
 
 ---
 
+## 11.1 CA 系列语义差异注记（第二轮代码级审计"接受差异"项，P63 回写）
+
+> 来源 18 §3 决策矩阵；2026-08-16 落注。三项均为"刻意设计差异"——非缺口，记录等价面与理由防复查误判。
+
+| # | Cordis 机制 | Keystone 现状（等价面） | 差异理由 |
+|---|------------|------------------------|---------|
+| CA-14 await 抛启动错误 | `fiber.await()` 重抛 startup error | CreateEntryAsync 收敛不抛；失败进 FAILED（GetPluginState 可查 + TaskFailedFact 已记录） | 隔离语义（09 §2 刻意设计）：单插件失败不阻断管理面调用方；诊断走事实事件而非异常通道 |
+| CA-16 internal/listener·dispatch | 监听器注册/分发本身作为总线事件暴露 | 无对应；等价面 = EventSubscriptionOptions + 五模式分发（emit/parallel/serial/bail/waterfall） | .NET 事件模型下订阅行为不作为总线事件暴露；元事件需求出现时经 EventBus 显式建模 |
+| CA-18 Service 抽象基族 | init/invoke/extend/check/tracker 五符号 | 服务 = 任意 T + Provide（init→InitializeAsync；invoke→GetLogger 形态；extend/check 无） | POCO 服务 + 扩展方法是 C# 惯例；check 为 G9 显式弃用（ADR-0011 同族理由） |
+
+---
+
 ## 12. 排查覆盖凭证（穷举审计）
 
 > 审计方法：对 vendored Cordis 全部 8 个源文件执行 `grep '^export'` 穷举导出符号，逐一对照覆盖状态；**第二轮**通读官方包源码（plugin-include + plugin-loader 全 7 文件，F 系列）；**第三轮**扫 bin.js CLI 入口 + cosmokit 工具库。
