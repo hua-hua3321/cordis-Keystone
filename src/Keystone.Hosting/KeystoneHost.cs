@@ -266,14 +266,30 @@ public sealed class KeystoneHost : IAsyncDisposable
             _capabilityDomain = null;
         }
 
-        DisposeOwnedLoggerFactory(); // CA-12：自建 factory（ServiceOptions 产物）
+        await DisposeOwnedLoggerFactoryAsync().ConfigureAwait(false); // CA-12：自建 factory（ServiceOptions 产物）
     }
 
     /// <summary>释放自建 logger factory（CA-12：ServiceOptions 接线产物；嵌入方注入的不归本宿主管）。</summary>
-    private void DisposeOwnedLoggerFactory()
+    private async Task DisposeOwnedLoggerFactoryAsync()
     {
-        _ownedLoggerFactory?.Dispose();
-        _ownedLoggerFactory = null;
+        // P2-21（19 号审计 LG-21）：M.E.L 9+ 的 LoggerFactory.Dispose/DisposeAsync 均不再
+        // 保证同步传导到 AddProvider 的 provider——自建产物（provider 本体）显式回收
+        _ringBufferLogs?.Dispose();
+
+        if (_ownedLoggerFactory is { } factory)
+        {
+            // 具体 LoggerFactory 实现 IAsyncDisposable（接口面未暴露——模式分派）
+            if (factory is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                factory.Dispose();
+            }
+
+            _ownedLoggerFactory = null;
+        }
     }
 
     /// <summary>关闭超时未收敛的插件（诊断审计，09 §4 第 6 步）。</summary>
@@ -301,15 +317,17 @@ public sealed class KeystoneHost : IAsyncDisposable
 
     // ── DC-15：CRUD 落盘写回管线（09 §5/08 §6.3）──
 
-    /// <summary>CRUD 变更防抖写回（ConfigFilePath 未配置 = 纯内存，无操作）。</summary>
+    /// <summary>CRUD 变更防抖写回（ConfigFilePath 未配置 = 纯内存，无写回）。
+    /// P2-27（19 号审计 IN-7）：通知在文件判定之前——纯内存模式 CRUD 与 Remove/load 事件面对齐。</summary>
     private void ScheduleWriteBack()
     {
+        NotifyConfigUpdate(); // P2-27：无条件通知（纯内存模式同样触发）
+
         if (_options.ConfigFilePath is null || _suppressWriteBack)
         {
             return; // CA-15：save=false 的事务内子操作不写回（防回环）
         }
 
-        NotifyConfigUpdate(); // 配置写回前通知（F9 loader/config-update）
         _configWriter ??= new Keystone.Config.Persistence.ConfigFileWriter(_options.ConfigFilePath);
         _configWriter.ScheduleWrite(DumpConfig());
     }
@@ -681,9 +699,26 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
     }
 
-    /// <summary>条目结构键（与 ConfigDiffer 同语义：name/inject/isolate 生效域；CA-4 判定用）。</summary>
-    private static string StructuralKeyOf(Keystone.Config.Entries.EntryOptions e)
-        => $"{e.Name}|{string.Join(",", e.Inject)}";
+    /// <summary>
+    /// 条目结构键（P2-5 统一：与 ConfigDiffer.StructuralKey 同语义——父/name/inject/生效 isolate/形状；
+    /// 修复前缺 isolate → isolate 变更误走热路径）。生效域按当前树谱系 + 候选条目自身声明解析
+    ///（updated 未落树前的等价视角：祖先链取树上现值，自身用候选值）。
+    /// </summary>
+    private string StructuralKeyOf(Keystone.Config.Entries.EntryOptions e)
+    {
+        var path = FindEntryPath(_tree, e.Id!) ?? [];
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var i = 0; i < path.Count - 1; i++)
+        {
+            Keystone.Config.Entries.IsolateMapResolver.Apply(path[i], map); // 祖先链（树上现值）
+        }
+
+        Keystone.Config.Entries.IsolateMapResolver.Apply(e, map); // 自身（候选值）
+        var parent = path.Count >= 2 ? path[^2].Id : null;
+        return $"{parent}|{e.Name}|{string.Join(",", e.Inject)}|"
+            + string.Join(",", map.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}={kv.Value}"))
+            + (e.IsGroup ? "|group" : "|leaf");
+    }
 
     /// <summary>定位条目 (父组 id, 组内下标)；根级 = (null, 根下标)；未找到 = (null, -1)。</summary>
     private static (string? Parent, int Index) LocateEntry(IReadOnlyList<Keystone.Config.Entries.EntryOptions> entries, string id, string? parent = null)

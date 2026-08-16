@@ -62,9 +62,10 @@ public sealed class RingBufferLoggerProvider : ILoggerProvider
         return level >= min;
     }
 
-    public void Dispose()
-    {
-    }
+    /// <summary>P2-21（19 号审计 LG-21）：Dispose 断言面——宿主 ShutdownAsync 经自建 factory 传导。</summary>
+    public bool IsDisposed { get; private set; }
+
+    public void Dispose() => IsDisposed = true;
 
     private sealed class RingLogger : ILogger
     {

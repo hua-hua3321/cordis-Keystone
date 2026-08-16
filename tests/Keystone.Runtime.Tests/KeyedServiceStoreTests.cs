@@ -51,12 +51,16 @@ public class KeyedServiceStoreTests
     }
 
     [Fact]
-    public void Same_owner_rebind_updates_value()
+    public void Same_owner_second_provide_throws_set_updates()
     {
+        // D-6（P68，对齐 reflect.ts:289-291）：二次 Provide 报错；更新走 Set
         var store = NewStore();
         using var disposer = store.Provide("fs", string.Empty, "old", "plugin-a");
-        store.Provide("fs", string.Empty, "new", "plugin-a");
 
+        Assert.Throws<KeystoneException>(() => store.Provide("fs", string.Empty, "new", "plugin-a"));
+        Assert.Equal("old", store.TryGet<string>("fs", string.Empty)); // 原值保持
+
+        store.Set("fs", string.Empty, "new", "plugin-a");
         Assert.Equal("new", store.TryGet<string>("fs", string.Empty));
     }
 

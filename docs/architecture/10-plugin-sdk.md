@@ -83,6 +83,8 @@ public interface IPluginContext
 
 **服务级选项消费定式**（CA-12，P60，intercept 对应物）：宿主经 `KeystoneHostOptions.ServiceOptions` 配服务选项（服务名 → 选项字典；日志首例 `"logger"`）。服务收到选项包后**自行绑定**：插件侧 `Options.Create<T>(...)` 编译期泛型（规则 0 第 5 条），框架不做反射式绑定。日志无需插件操心——`context.Logger` 已按 `levels.{category}` / `defaultLevel` 三级阈值过滤（RingBufferLoggerProvider 接线）。
 
+**P2-19（19 号审计 LG-18）`levels` 键形态**：键必须是**完整 category 字符串**（含域前缀，如 `keystone/logp`）——`RingBufferLoggerProvider` 按 category 精确匹配查覆盖；写裸名 `logp` 不会命中（静默回落 defaultLevel）。查完整 category：插件侧 `context.Logger` 对应 `{域前缀}/{插件 ID}`。
+
 ## 5. 事件订阅与插件生命周期绑定
 
 - `Subscribe*` 返回的 disposer 也可手动调用；不手动调用则随插件卸载自动摘除（03-context §7）

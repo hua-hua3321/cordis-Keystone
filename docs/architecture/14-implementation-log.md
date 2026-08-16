@@ -1081,6 +1081,23 @@ created: 2026-08-15
 | T7 ConsoleSink 文档修正（P2-18） | 05 §5 承诺改"核心默认零 provider（内存缓冲），Console/File/exporter 均 opt-in"——对齐 Cordis 核心（console 属生态包） | 05-reliability.md | 文档校验通过 | ✔ |
 | T8 回归 | 全量 6 套件 | 新增 9 测试（Hosting 6 + Runtime 3） | 447/447；Hosting AOT 零 IL 警告 | ✔ |
 
+#### W68-01 P68：服务语义与机械收尾批（19 §3/§4：D-6 + P2-5/19/21/24..30 + LD-5 + 监督观测面修正）
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| T1 Provide 报错式（D-6） | 同域二次 Provide 一律抛 ServiceAlreadyRegistered（无论属主——修复前同属主 rebind 静默覆盖）；对齐 reflect.ts:289-291 | KeyedServiceStore.cs/ContextFacade.cs/IPluginContext.cs | Second_provide_same_owner_throws 等 3 例 + 两处旧 rebind 测试改废 | ✔ |
+| T2 Set（D-6） | 显式更新通道：属主校验（异属主 ServiceAlreadyRegistered）/未提供 GatingServiceNotFound/静默换值不通知（依赖方门控不重评——换值 ≠ 下线/上线，对齐 reflect.ts:254-265） | KeyedServiceStore.cs/ContextFacade.cs/IPluginContext.cs | Set_updates_value_without_notification 等 3 例 | ✔ |
+| T3 结构键统一（P2-5） | StructuralKeyOf 与 ConfigDiffer.StructuralKey 同语义（父/name/inject/生效 isolate/形状；候选条目视角：祖先链取树上现值+自身候选值）——修复前缺 isolate → isolate 变更误走热路径 | KeystoneHost.cs | UpdateEntry_isolate_change_takes_cold_path | ✔ |
+| T4 纯内存通知面对齐（P2-27） | ScheduleWriteBack 通知先于文件判定——无 ConfigFilePath 的 CRUD 全触发 ConfigUpdate（修复前 Create/Update 早退不通知、Remove 触发） | KeystoneHost.cs | Pure_memory_crud_fires_config_update_on_create_and_update | ✔ |
+| T5 写回管线加固（P2-24/25/26） | OnWriteFailed 事件（Timer 丢弃路径可观测——对齐 Cordis logger.warn）；EACCES 短退避 3 次再降级（对齐 include 重试）；意外异常统一包 KeystoneException（修复 initial 裸 FileNotFoundException） | ConfigFileWriter.cs/WriteFailedEventArgs.cs | Debounced_flush_failure_surfaces_via_OnWriteFailed + Initial_write_failure_wrapped | ✔ |
+| T6 序列化保真（P2-28） | 字典列表块形（`key:` 后逐 `- k: v`——修复重复键塌缩丢数据）；特殊标量双引号（`:`/`#`/空格/流标点——修复重解析错切）；空容器显式 `{}`/`[]`（修复塌缩 null） | EntrySerializer.cs | EntrySerializerFidelityTests 3+4 例 | ✔ |
+| T7 fire-and-forget emit（P2-29） | EmitFireAndForget：PublishParallelAsync 后台执行不阻塞发布方，异常被观察（对齐 events.ts emit 不 await promise） | ContextFacade.cs/IPluginContext.cs | EmitFireAndForget_returns_before_async_listener_completes | ✔ |
+| T8 logger Dispose 断言（P2-21/LG-21） | RingBufferLoggerProvider.IsDisposed + ShutdownAsync 显式回收自建 provider（M.E.L 9+ factory Dispose 不传导——实测确认）；GetLogger xmldoc 错位修正 | RingBufferLoggerProvider.cs/KeystoneHost.cs/ContextFacade.cs | Shutdown_disposes_owned_logger_factory | ✔ |
+| T9 levels 键文档（P2-19）+ 决策默认值注记（P2-30） | 10 §4/HostOptions xmldoc：levels 键 = 完整 category（含域前缀）——裸名静默不命中；P2-30 记入 19 号注记（类型系统差异） | 10-plugin-sdk.md/KeystoneHostOptions.cs | 文档校验通过 | ✔ |
+| T10 LD-5 注释修正（P2-31） | GroupTransactionTests 头注改实况：应用为声明序**串行**（undo 确定性要求），非 group.ts:71 并行——失败面等价、时序刻意差异 | GroupTransactionTests.cs | 注释与实现一致 | ✔ |
+| T11 管道异常回填 + 监督观测面修正（回归发现） | 归因分离：中间件异常 → 失败结果回填 + actor 边界 LoggerMessage 日志（actor 存活）；终端 handler 崩溃 → HandlerFaultException 标记 → 回填 future 后上抛触发 OneForOne 重启（05 §2 监督契约保留）——修复"异常吞进永不完成的 Proto.Future"（全量挂起根因，人工二分 29 类才定位）；两处监督测试观测面更新（崩溃=即时失败结果而非挂到调用方超时） | CapabilityActor.cs | Middleware_exception_returns_failed_result_not_hang + 监督 3 例更新 | ✔ |
+| T12 回归 | 全量 6 套件 | 新增 18 测试 | 465/465；Hosting AOT 零 IL 警告 | ✔ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |

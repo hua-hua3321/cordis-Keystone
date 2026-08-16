@@ -46,14 +46,16 @@ public class ContextFacadeIsolateTests
     }
 
     [Fact]
-    public void Same_context_rebind_updates_value()
+    public void Same_context_second_provide_throws_set_updates()
     {
+        // D-6（P68）：二次 Provide 报错；更新走 Set
         var root = NewRoot();
         var a = Child(root, "plugin-a");
         a.Provide("fs", "old");
 
-        a.Provide("fs", "new");
+        Assert.Throws<Keystone.Core.Errors.KeystoneException>(() => a.Provide("fs", "new"));
 
+        a.Set("fs", "new");
         Assert.Equal("new", root.Get<string>("fs"));
     }
 

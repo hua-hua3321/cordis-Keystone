@@ -146,7 +146,16 @@ public class MultiInstanceIntegrationTests
             // 从实例 context 读累计计数（每请求新建则读不到默认 0 → 恒 1）
             var prior = ctx.TryGet<object>("counter") is int n ? n : 0;
             RequestCount = prior + 1;
-            ctx.Provide("counter", RequestCount);
+            // D-6（P68）：首写 Provide（注册），后续 Set（原位更新）——二次 Provide 已是报错语义
+            if (prior == 0)
+            {
+                ctx.Provide("counter", RequestCount);
+            }
+            else
+            {
+                ctx.Set("counter", RequestCount);
+            }
+
             await next(ctx);
         }
     }

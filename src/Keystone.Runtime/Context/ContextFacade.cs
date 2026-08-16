@@ -133,6 +133,16 @@ public sealed class ContextFacade : IPluginContext, IContext
         }
     }
 
+    /// <summary>
+    /// D-6（19 号审计 SV-1，对齐 reflect.ts:254-265 set）：原位更新本 context 已提供的服务值——
+    /// 未提供抛错、不通知（依赖方门控不重评：换值 ≠ 下线/上线）；二次注册仍走 <see cref="Provide{T}"/> 报错式。
+    /// </summary>
+    public void Set<T>(string serviceName, T instance)
+    {
+        NotifyWrite(serviceName, instance);
+        _store.Set(serviceName, ResolveRealm(serviceName), instance, ownerId: Name);
+    }
+
     /// <summary>D-7（19 号审计 SV-2）：开启属主暂存——init 期 provide 延迟到 Commit（= ACTIVE 补发）。</summary>
     public IDisposable BeginProvidesStaging() => _store.BeginStaging(Name);
 
@@ -178,6 +188,34 @@ public sealed class ContextFacade : IPluginContext, IContext
     // 订阅同时挂 effect——context quiesce（DisposeEffectsAsync）自动退订，handler 不滞留
     // 共享总线（否则插件卸载后 ALC 被钉死）。手动 Dispose 退订与 quiesce 退订幂等共存。
 
+    /// <summary>
+    /// P2-29（19 号审计 EV-13，对齐 Cordis emit 的 fire-and-forget）：异步监听
+    /// （<c>SubscribeParallel</c>）不阻塞发布方——立即返回，分发在后台进行（不 await 全部完成）；
+    /// 异常被观察（不产生未观察任务异常，对齐 Cordis emit 不 await 返回 promise）。
+    /// 需要等待/聚合错误用 <c>Events.PublishParallelAsync</c>；同步监听（Subscribe）经
+    /// <c>Events.EmitAsync</c> 本就不阻塞。
+    /// </summary>
+    public void EmitFireAndForget<TEvent>(TEvent e)
+    {
+        _ = ObserveAsync(_events.PublishParallelAsync(e, this));
+        return;
+
+        static async Task ObserveAsync(Task task)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            // CA1031：后台分发的监听异常被观察后吞掉（发布方不感知——fire-and-forget 语义）
+#pragma warning disable CA1031
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+                // 观察 = 防未观察任务异常
+            }
+        }
+    }
+
     public IDisposable Subscribe<TEvent>(Action<TEvent> handler, EventSubscriptionOptions? options = null)
         => TrackSubscription(_events.Subscribe(handler, Normalize(options)));
 
@@ -215,7 +253,6 @@ public sealed class ContextFacade : IPluginContext, IContext
 
     // ── IContext：Effect / 日志 / 拦截器 ──
 
-    /// <summary>命名日志（category：DC-20 = {域前缀}/{name}，无前缀 = name）。</summary>
     /// <summary>
     /// 当前请求取消令牌（DC-14，06 §1）：自身槽未设置时沿父链取（插件 handler 闭包读自身
     /// context 即得实例级请求 CT）；均无 = None（无请求语义）。
@@ -231,6 +268,7 @@ public sealed class ContextFacade : IPluginContext, IContext
     /// </summary>
     public void SetRequestCancellationToken(CancellationToken token) => _requestCancellationToken = token;
 
+    /// <summary>命名日志（category：DC-20 = {域前缀}/{name}，无前缀 = name）。</summary>
     public ILogger GetLogger(string? name = null)
         => _loggerFactory.CreateLogger(
             _logCategoryPrefix is { } prefix ? $"{prefix}/{name ?? Name}" : name ?? Name);

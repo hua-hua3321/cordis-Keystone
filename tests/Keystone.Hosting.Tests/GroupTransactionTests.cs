@@ -4,10 +4,12 @@ using Keystone.Runtime.Plugins.Lifecycle;
 namespace Keystone.Hosting.Tests;
 
 /// <summary>
-/// CA-3 组级事务（18 §2 P1，P59）：ApplyConfigAsync 组内并行应用 + 失败聚合 + 逆序回滚。
+/// CA-3 组级事务（18 §2 P1，P59）：组内逐条应用（声明序）+ 失败聚合 + 逆序回滚。
+/// P2-31/LD-5（P68 注释修正）：应用为**串行**（非 group.ts:71 allSettled 并行）——
+/// 逆序 undo 登记要求确定的失败前缀序；单错抛因/多错聚合面与 Cordis 等价，时序刻意差异（undo 确定性）。
 /// 修复前：顺序应用、首错中断、无回滚——组更新一半失败 → 半应用状态（部分新叶已加载却上抛调用方，
 /// 调用方重试/放弃均基于不一致树）。
-/// 兑现（对齐 Cordis group 事务 + P53 门控超时修正——组内按 inject 依赖拓扑分层并行）：
+/// 兑现（对齐 Cordis group 事务的失败面语义——应用序为声明序串行，见上注）：
 /// 单错抛原因；多错 AggregateException；回滚 = 逆序撤销本次已成功变更（Added→Remove、ConfigChanged→Update 旧值）；
 /// 回滚失败聚合进同一异常上抛。
 /// </summary>

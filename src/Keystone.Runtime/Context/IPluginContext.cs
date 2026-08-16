@@ -32,8 +32,14 @@ public interface IPluginContext
     /// </summary>
     Lazy<Task<T>> GetLazy<T>(string serviceName);
 
-    /// <summary>提供服务（属主 = 本插件；rebind/属主校验，03 §2.1/§2.3）。</summary>
+    /// <summary>提供服务（属主 = 本插件；同域二次注册抛错，03 §2.1/§2.3——D-6 对齐 Cordis 报错式）。</summary>
     void Provide<T>(string serviceName, T instance);
+
+    /// <summary>原位更新已提供的服务值（属主校验/未提供抛错/不通知——D-6 对齐 reflect set）。</summary>
+    void Set<T>(string serviceName, T instance);
+
+    /// <summary>fire-and-forget emit（异步监听不阻塞发布方，P2-29 对齐 Cordis emit）。</summary>
+    void EmitFireAndForget<TEvent>(TEvent e);
 
     /// <summary>emit 监听。</summary>
     IDisposable Subscribe<TEvent>(Action<TEvent> handler, EventSubscriptionOptions? options = null);

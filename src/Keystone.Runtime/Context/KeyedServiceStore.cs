@@ -39,7 +39,8 @@ public sealed class KeyedServiceStore
 
     /// <summary>
     /// 注册服务值（值即注册）：写键并返回删键 disposer（dispose = 属主移除 + Removed 通知；已移除则幂等无操作）。
-    /// 同键同属主 = rebind（G14 允许，值更新）；同键异属主 = ServiceAlreadyRegistered。
+    /// D-6（19 号审计 SV-1，对齐 reflect.ts:289-291）：同域已存在（无论属主）→ ServiceAlreadyRegistered——
+    /// 更新走 <see cref="Set"/>（显式静默换值）；修复前同属主 rebind 静默覆盖。
     /// D-7（19 号审计 SV-2）：属主暂存激活时写入暂存区（不可见、无通知）——CommitStaging 才落库 + 合并通知
     /// （对齐 Cordis：init 期 provide 不 notify，fiber ACTIVE 转换才补发）。
     /// </summary>
@@ -201,9 +202,10 @@ public sealed class KeyedServiceStore
     {
         lock (_lock)
         {
-            if (_services.TryGetValue(key, out var existing)
-                && !string.Equals(existing.OwnerId, ownerId, StringComparison.Ordinal))
+            if (_services.TryGetValue(key, out var existing))
             {
+                // D-6：同域已存在一律抛错（无论属主——对齐 Cordis reflect provide 报错式）；
+                // 属主不同沿用原报错文案（点名占用者）
                 throw new KeystoneException(
                     ErrorCode.ServiceAlreadyRegistered,
                     $"service '{key.Name}' (realm '{key.Realm}') has been registered by '{existing.OwnerId}'");
@@ -211,6 +213,37 @@ public sealed class KeyedServiceStore
 
             _services[key] = new Entry(value, ownerId);
             return RecordChange(key);
+        }
+    }
+
+    /// <summary>
+    /// D-6（19 号审计 SV-1，对齐 reflect.ts:254-265 set）：原位更新已提供的服务值——
+    /// 属主校验（非属主 = ServiceAlreadyRegistered）、未提供 = GatingServiceNotFound、
+    /// 不通知（依赖方门控不重评：换值 ≠ 下线/上线）。
+    /// </summary>
+    public void Set<T>(string serviceName, string realm, T value, string ownerId)
+    {
+        var key = ValidateKey(serviceName, realm);
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+
+        lock (_lock)
+        {
+            if (!_services.TryGetValue(key, out var existing))
+            {
+                throw new KeystoneException(
+                    ErrorCode.GatingServiceNotFound,
+                    $"service '{serviceName}' (realm '{realm}') is not provided — nothing to set");
+            }
+
+            if (!string.Equals(existing.OwnerId, ownerId, StringComparison.Ordinal))
+            {
+                throw new KeystoneException(
+                    ErrorCode.ServiceAlreadyRegistered,
+                    $"service '{key.Name}' (realm '{key.Realm}') has been registered by '{existing.OwnerId}'");
+            }
+
+            _services[key] = new Entry(value, ownerId); // 静默换值（无 RecordChange）
         }
     }
 

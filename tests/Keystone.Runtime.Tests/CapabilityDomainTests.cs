@@ -53,10 +53,11 @@ public class CapabilityDomainTests
             return new TaskResultEnvelope { TaskId = envelope.TaskId, Succeeded = true, Type = TaskResultType.Completed };
         });
 
-        // 首次失败：handler 抛错 → 无 Respond → 请求被取消（actor 崩溃，Proto.Actor 监督重启）
+        // P68 监督观测面更新：handler 抛错 → 立即失败结果回填（future 完成不挂死），
+        // actor 仍崩溃 → Proto.Actor 监督重启（respond 后上抛触发）
         using var firstCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        await Assert.ThrowsAnyAsync<Exception>(() =>
-            domain.RequestAsync(handle, Envelope("1"), firstCts.Token));
+        var first = await domain.RequestAsync(handle, Envelope("1"), firstCts.Token);
+        Assert.False(first.Succeeded);
 
         // 重启后成功（新 token）
         using var secondCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));

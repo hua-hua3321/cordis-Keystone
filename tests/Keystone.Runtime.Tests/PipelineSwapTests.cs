@@ -97,7 +97,15 @@ public class PipelineSwapTests
         {
             var current = ctx.TryGet<int>("request-count");
             trace.Add($"observed={current}");
-            ctx.Provide("request-count", current + 1); // 写公共祖先（实例 root，03 §2.1）
+            // D-6（P68）：首写 Provide（注册），后续 Set（原位更新）——写公共祖先（实例 root，03 §2.1）
+            if (current == 0)
+            {
+                ctx.Provide("request-count", 1);
+            }
+            else
+            {
+                ctx.Set("request-count", current + 1);
+            }
             await next(ctx);
         }
     }
@@ -132,5 +140,58 @@ public class PipelineSwapTests
         public int Order => 0;
 
         public Task InvokeAsync(IPluginContext ctx, RequestDelegate next) => next(ctx);
+    }
+}
+
+public class PipelineFaultBackfillTests
+{
+    private static TaskResultEnvelope Ok(TaskEnvelope e) => new()
+    {
+        TaskId = e.TaskId,
+        Succeeded = true,
+        Type = TaskResultType.Completed,
+    };
+
+    private static TaskEnvelope Envelope(Guid taskId) => new()
+    {
+        TaskId = taskId,
+        Capability = "fs",
+        Operation = "read",
+        PayloadBytes = [],
+    };
+
+    /// <summary>
+    /// P68（19 号审计回归发现）：管道/中间件抛任意异常 → 任务失败回填——future 不悬挂。
+    /// 修复前：ReceiveAsync 只 catch OperationCanceledException，中间件抛 KeystoneException
+    /// （如 D-6 二次 Provide）时 Proto.Future 永不完成 → 无超时调用方永久挂起。
+    /// </summary>
+    [Fact]
+    public async Task Middleware_exception_returns_failed_result_not_hang()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await using var system = new ActorSystem();
+        var domain = CapabilityDomain.Attach(system, "fs");
+
+        var handle = domain.Spawn("fs-a", e => Task.FromResult(Ok(e)),
+            [new ThrowingMiddleware()]);
+
+        var response = await domain.RequestAsync(handle, Envelope(Guid.NewGuid()), cts.Token);
+
+        // 不挂起（cts 内返回）+ 失败面回填（错误码 + 异常消息）
+        Assert.False(response.Succeeded);
+        Assert.Equal(Keystone.Core.Errors.ErrorCode.PipelineExecutionFailed, response.ErrorCode);
+        Assert.Contains("second provide", response.ErrorDetail);
+    }
+
+    private sealed class ThrowingMiddleware : IMiddleware
+    {
+        public string Id => "throwing";
+
+        public int Order => 0;
+
+        public Task InvokeAsync(IPluginContext ctx, RequestDelegate next)
+            => throw new Keystone.Core.Errors.KeystoneException(
+                Keystone.Core.Errors.ErrorCode.ServiceAlreadyRegistered,
+                "second provide rejected (D-6)");
     }
 }

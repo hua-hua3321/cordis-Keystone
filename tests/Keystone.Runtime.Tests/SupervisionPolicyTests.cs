@@ -28,12 +28,15 @@ public class SupervisionPolicyTests
             return new TaskResultEnvelope { TaskId = envelope.TaskId, Succeeded = true, Type = TaskResultType.Completed };
         });
 
+        // P68 监督观测面更新：handler 崩溃 → 立即失败结果回填（不挂死）+ actor 重启
         using var firstCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        await Assert.ThrowsAnyAsync<Exception>(() => domain.RequestAsync(handle, Envelope("1"), firstCts.Token));
+        var first = await domain.RequestAsync(handle, Envelope("1"), firstCts.Token);
+        Assert.False(first.Succeeded); // 崩溃即时回填（修复前挂到调用方超时）
+        Assert.Equal(Keystone.Core.Errors.ErrorCode.PipelineExecutionFailed, first.ErrorCode);
 
         using var secondCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var result = await domain.RequestAsync(handle, Envelope("2"), secondCts.Token);
-        Assert.True(result.Succeeded); // 重启后成功（OneForOne Restart）
+        Assert.True(result.Succeeded); // 重启后成功（OneForOne Restart——respond 后上抛触发）
         Assert.Equal(2, calls);
     }
 

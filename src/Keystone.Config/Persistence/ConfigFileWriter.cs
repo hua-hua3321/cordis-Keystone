@@ -12,6 +12,7 @@ namespace Keystone.Config.Persistence;
 public class ConfigFileWriter : IDisposable
 {
     private const int WriteRetryLimit = 10;
+    private const int AccessDeniedRetryLimit = 3; // P2-25：瞬态拒绝访问短退避次数（再降级）
     private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(50);
 
     private readonly string _path;
@@ -46,6 +47,12 @@ public class ConfigFileWriter : IDisposable
         return WriteCoreAsync(content);
     }
 
+    /// <summary>
+    /// P2-24（19 号审计 IN-4）：防抖冲刷失败事件——Timer 内 <c>_ = FlushAsync()</c> 的丢弃路径
+    /// 经此面暴露（对齐 Cordis logger.warn；显式 FlushAsync/WriteAsync 调用仍直接上抛）。
+    /// </summary>
+    public event EventHandler<WriteFailedEventArgs>? OnWriteFailed;
+
     /// <summary>防抖调度写（多次变更合并为一次，F6）。</summary>
     public void ScheduleWrite(IReadOnlyList<EntryOptions> entries)
     {
@@ -59,7 +66,23 @@ public class ConfigFileWriter : IDisposable
         {
             _pending = entries;
             _debounce?.Dispose();
-            _debounce = new Timer(_ => _ = FlushAsync(), null, DebounceDelay, Timeout.InfiniteTimeSpan);
+            _debounce = new Timer(_ => _ = FlushObservedAsync(), null, DebounceDelay, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    /// <summary>P2-24：Timer 路径的观察包装——重试耗尽等失败经 <see cref="OnWriteFailed"/> 暴露。</summary>
+    private async Task FlushObservedAsync()
+    {
+        try
+        {
+            await FlushAsync().ConfigureAwait(false);
+        }
+        // CA1031：防抖丢弃路径的兜底吞异常——失败经 OnWriteFailed 事件面暴露（P2-4 语义）
+#pragma warning disable CA1031
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            OnWriteFailed?.Invoke(this, new WriteFailedEventArgs(ex));
         }
     }
 
@@ -146,6 +169,12 @@ public class ConfigFileWriter : IDisposable
                     $"failed to write config file {_path} after {WriteRetryLimit} attempts: {ex.Message}",
                     ex);
             }
+            catch (Exception ex) when (IsAccessDenied(ex) && attempt < AccessDeniedRetryLimit)
+            {
+                // P2-25（19 号审计 IN-5，对齐 Cordis include 预检+重试）：瞬态拒绝访问
+                //（编辑器/杀毒软件短暂占用 ACL）先短退避重试，再判死降级
+                await Task.Delay((attempt + 1) * 50).ConfigureAwait(false);
+            }
             catch (Exception ex) when (IsAccessDenied(ex))
             {
                 // CA-7：拒绝访问 → 只读降级（区别于共享占用：占用该重试、拒绝该降级；
@@ -153,6 +182,15 @@ public class ConfigFileWriter : IDisposable
                 Volatile.Write(ref _readOnly, true);
                 OnReadOnly?.Invoke();
                 return; // 本次写放弃（静默），后续写直接短路
+            }
+            catch (Exception ex) when (ex is not KeystoneException)
+            {
+                // P2-26（19 号审计 IN-6）：意外底层异常统一包 KeystoneException 语义面
+                //（修复前 initial 写失败裸 FileNotFoundException/DirectoryNotFoundException 上抛）
+                throw new KeystoneException(
+                    ErrorCode.ConfigProviderFailed,
+                    $"failed to write config file {_path}: {ex.Message}",
+                    ex);
             }
         }
     }

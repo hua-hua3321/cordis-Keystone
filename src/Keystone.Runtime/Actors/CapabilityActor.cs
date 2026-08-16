@@ -1,4 +1,5 @@
 using Keystone.Core.Contracts;
+using Microsoft.Extensions.Logging;
 using Keystone.Runtime.Context;
 using Keystone.Runtime.Pipeline;
 using Proto;
@@ -20,7 +21,7 @@ namespace Keystone.Runtime.Actors;
     "Performance",
     "CA1812",
     Justification = "CapabilityActor 由 Proto.Actor Props.FromProducer 反射实例化（CapabilityDomain.Spawn）")]
-internal sealed class CapabilityActor : IActor
+internal sealed partial class CapabilityActor : IActor
 {
     private readonly Func<TaskEnvelope, Task<TaskResultEnvelope>> _handler;
     private readonly ContextFacade _instanceContext;
@@ -80,20 +81,16 @@ internal sealed class CapabilityActor : IActor
                 }
                 else
                 {
-                    // DC-14：请求 CT 经实例 context 暴露（中间件/handler 链上可读；结束复位）
-                    _instanceContext.SetRequestCancellationToken(requestCt);
+                    // P68 归因分离：终端 handler 崩溃 = 业务监督面（05 §2 重启契约）——
+                    // 先回填 future（调用方立即得失败结果，不挂死）再上抛触发 OneForOne 重启
                     try
                     {
-                        result = await ExecuteTracedAsync(envelope).ConfigureAwait(false);
+                        result = await ExecuteRequestAsync(envelope, requestCt).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException)
+                    catch (HandlerFaultException fault)
                     {
-                        // 中间件/handler 主动取消 → 任务失败（不升级监督重启）
-                        result = CancelledResult(envelope);
-                    }
-                    finally
-                    {
-                        _instanceContext.SetRequestCancellationToken(CancellationToken.None);
+                        await RespondHandlerFaultAsync(context, envelope, fault).ConfigureAwait(false);
+                        throw; // actor 崩溃 → 监督重启（05 §2；context.Respond 已送达——future 已完成）
                     }
                 }
 
@@ -106,6 +103,41 @@ internal sealed class CapabilityActor : IActor
                 // DC-10：原子替换——新链构建完成后换引用；串行循环内在途请求已捕获旧链（无交错）
                 _pipeline = BuildPipeline(middlewares);
                 break;
+        }
+    }
+
+    /// <summary>DC-14：执行单请求——请求 CT 经实例 context 暴露；取消/异常均转失败结果
+    ///（异常必须回填 future——否则 Proto.Future 永不完成，无超时调用方永久挂起，P68）。</summary>
+    private async Task<TaskResultEnvelope> ExecuteRequestAsync(TaskEnvelope envelope, CancellationToken requestCt)
+    {
+        _instanceContext.SetRequestCancellationToken(requestCt);
+        try
+        {
+            return await ExecuteTracedAsync(envelope).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // 中间件/handler 主动取消 → 任务失败（不升级监督重启）
+            return CancelledResult(envelope);
+        }
+        catch (HandlerFaultException)
+        {
+            throw; // 终端 handler 崩溃——上抛 ReceiveAsync 走"回填 + 监督重启"路径（P68 归因）
+        }
+        // CA1031：管道/中间件可抛任意异常（D-6 后含服务重复注册等业务错）——
+        // 一律转任务失败回填（否则 Proto.Future 永不完成，无超时调用方永久挂起）
+#pragma warning disable CA1031
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            // 消息模型调试性（P68）：actor 边界是异常最后可见点——必须落日志
+            //（category = 实例名；TaskId 关联事实事件与 trace）
+            LogPipelineFault(_instanceContext.Logger, InstanceName, envelope.TaskId, ex.GetType().Name, ex.Message, ex);
+            return FailedResult(envelope, ex);
+        }
+        finally
+        {
+            _instanceContext.SetRequestCancellationToken(CancellationToken.None);
         }
     }
 
@@ -128,7 +160,7 @@ internal sealed class CapabilityActor : IActor
 
         builder.SetTerminal(_ =>
         {
-            _currentResult = _handler(_currentEnvelope!).GetAwaiter().GetResult();
+            _currentResult = InvokeHandlerMarked(_handler, _currentEnvelope!);
             return Task.CompletedTask;
         });
 
@@ -157,6 +189,62 @@ internal sealed class CapabilityActor : IActor
     }
 
     /// <summary>DC-14：取消结果（PipelineCancelled——06 §1 取消贯穿；失败不升级监督）。</summary>
+    // CA1848：编译期委托（结构化字段：instance/taskId/type/message）
+    [LoggerMessage(
+        EventId = 6001,
+        Level = LogLevel.Error,
+        Message = "actor '{instance}' task {taskId} pipeline fault: {faultType}: {faultMessage}")]
+    private static partial void LogPipelineFault(
+        ILogger logger, string instance, Guid taskId, string faultType, string faultMessage, Exception exception);
+
+    /// <summary>P68 归因：终端 handler 调用统一包裹——崩溃打 <see cref="HandlerFaultException"/> 标记
+    ///（区别于中间件异常：监督契约保留——回填后仍上抛触发 OneForOne 重启，05 §2）。</summary>
+    private static TaskResultEnvelope InvokeHandlerMarked(
+        Func<TaskEnvelope, Task<TaskResultEnvelope>> handler, TaskEnvelope envelope)
+    {
+        try
+        {
+            return handler(envelope).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new HandlerFaultException(ex);
+        }
+    }
+
+    /// <summary>handler 崩溃路径：日志 + 结果缓存 + 事实 + 回填（Respond 后由调用方上抛触发重启）。</summary>
+    private async Task RespondHandlerFaultAsync(IContext context, TaskEnvelope envelope, HandlerFaultException fault)
+    {
+        var inner = fault.InnerException;
+        LogPipelineFault(
+            _instanceContext.Logger, InstanceName, envelope.TaskId,
+            inner.GetType().Name, inner.Message, inner);
+        var result = FailedResult(envelope, inner);
+        RecordResult(envelope.TaskId, result);
+        await PublishFactAsync(envelope, result).ConfigureAwait(false);
+        context.Respond(new DomainResponse(result));
+    }
+
+    /// <summary>终端 handler 崩溃标记（P68）：内层为业务原始异常。
+    /// CA1032：标准构造器无意义（标记类型只经单参工厂创建）——豁免。</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1032", Justification = "标记类型仅经单参构造创建（inner 必填）")]
+    private sealed class HandlerFaultException(Exception inner) : Exception("terminal handler faulted", inner)
+    {
+        /// <summary>业务原始异常（构造保证非空——CS8602 消解）。</summary>
+        public new Exception InnerException => base.InnerException!;
+    }
+
+    /// <summary>P68（19 号审计回归发现）：管道异常 → 失败结果回填——future 不悬挂。
+    /// 05 §4 语义：handler/中间件异常 = 任务失败（错误面带异常消息），不升级监督重启。</summary>
+    private static TaskResultEnvelope FailedResult(TaskEnvelope envelope, Exception ex) => new()
+    {
+        TaskId = envelope.TaskId,
+        Succeeded = false,
+        Type = TaskResultType.Failed,
+        ErrorCode = Keystone.Core.Errors.ErrorCode.PipelineExecutionFailed,
+        ErrorDetail = ex.Message,
+    };
+
     private static TaskResultEnvelope CancelledResult(TaskEnvelope envelope) => new()
     {
         TaskId = envelope.TaskId,
@@ -214,7 +302,8 @@ internal sealed class CapabilityActor : IActor
     /// <summary>直通管道（无中间件；DC-10 缓存形态——避免无谓包装）。</summary>
     private sealed class DirectPipeline(Func<TaskEnvelope, Task<TaskResultEnvelope>> handler) : IPipeline
     {
-        public Task<TaskResultEnvelope> ExecuteAsync(TaskEnvelope envelope) => handler(envelope);
+        public Task<TaskResultEnvelope> ExecuteAsync(TaskEnvelope envelope)
+            => Task.FromResult(InvokeHandlerMarked(handler, envelope));
 
         Task IPipeline.InvokeAsync(IPluginContext context) => throw new NotSupportedException(
             "direct pipeline executes via ExecuteAsync (handler terminal inlined)");
