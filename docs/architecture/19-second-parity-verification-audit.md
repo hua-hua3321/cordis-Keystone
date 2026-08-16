@@ -106,6 +106,42 @@ status: standard
 | P67 | D-1..D-9 逐项决策（对齐 or 注记）| 人工裁定 |
 | P68+ | P2 清单按价值排序 | 常规 |
 
+## 8. P64 总裁定（2026-08-16，人工）：全部语义分歧按 Cordis 方式对齐
+
+> 用户裁定：上述所有带决策的语义/选择项**一律按 Cordis 的方式**。D-1（真热更新）不再注记接受而是实施；D-6（Provide/set）不再 upsert 而是对齐报错式；D-8（事件 scope）不再保持隔离而是改广播。
+
+| # | 裁定 | 实施含义 |
+|---|------|---------|
+| D-1 | 真热更新：实施 | PluginLoader 增 config-only 原地通道（不重编译/不换 ALC；对齐 fiber.update 不重导入语义）——机制级，独立批次 + 14 §4 决策记录 |
+| D-2 | 字段合并：对齐 | UpdateEntryAsync 改逐字段合并（提供的覆盖、显式清空出口——对齐 entry.ts:146-154 null 删字段语义） |
+| D-3 | parent 缺省不动：对齐 | 增"保持现父"语义（缺省不移动；显式传 null = 根） |
+| D-4 | 失败复原运行时：对齐 | 失败路径重启旧插件（对齐 entry.ts:232-243 `_start(previousPlugin)`） |
+| D-5 | Removed 回滚：对齐 | Removed 成功后登记 undo（对齐 group.ts:95-101 全量重建语义）；P59 注记作废 |
+| D-6 | Provide/set 报错式：对齐 | 同域二次 Provide 抛错（无论属主）；增设 Set（属主校验/未提供抛错/不通知）；rebind 现行为与测试作废；03 §2.1 文档随之成立 |
+| D-7 | 门控 ACTIVE 时机：对齐 | 提供者须 ACTIVE 才放行依赖方（init 中途 provide 不通知，ACTIVE 补发） |
+| D-8 | 事件广播：对齐 | 缺省 emit 广播（跨 scope 可见；filter 仅显式声明）；现有祖先链过滤语义与测试改废 |
+| D-9 | Effect Dispose=执行：对齐 | Registration.Dispose() 执行 disposer 一次（幂等） |
+| P2-9 | EntryGroup 死代码：删除 | Cordis 无此 standalone 双实现；宿主为唯一真源 |
+| P2-13 | PENDING + FAILED re-arm：对齐 | 依赖消失 → PENDING（可 re-arm 存活态，非 Disposed）；FAILED 随依赖变化重评（对齐 fiber.ts:611-623、reflect.ts:323-327） |
+| P2-18 | ConsoleSink：对齐 Cordis 核心 | 核心默认仅缓冲（console 属生态包 opt-in）——修正 05 §5 承诺，不默认接线 |
+| P2-2 | EntryPatcher 三处：对齐 | null 清字段/无 patch 也 detached/insert+override 互斥（对齐 include:63-64/121-124/80-103） |
+| P2-16 | provides 属主校验：加强保留 | Cordis 无此校验但 Keystone 的"消灭门控放行落空"是 additive 增强，与 Cordis 无冲突，保留并补属主 |
+| P1-6 (LD-13) | disabled 级联：对齐 | 组翻转级联子叶 + 祖先检查（对齐 entry.ts:88-98） |
+| P1-7 (LD-17) | 组转换分级：对齐 | Group 关系入结构键、叶↔组转换走冷路径（对齐 entry.ts:194） |
+
+> Keystone additive 增强（Cordis 无对应、不构成语义分歧）保留不动：None 解除（P2-4 超集）、provides 兑现校验（P2-16）、门控超时（DC-5 既有裁定，Cordis 无限等是缺陷不是特性）、manifest 校验、事实持久化等。
+
+## 9. 修订实施批次（裁定后）
+
+| 批次 | 内容 | 备注 |
+|------|------|------|
+| P64 | P0-1/2/3（事务三连）+ D-4/D-5（失败复原+Removed 回滚，同区域）+ P0-6（订阅回收）+ P0-7（计时器收口）+ D-9（Effect Dispose=执行） | 事务与生命周期正确性 |
+| P65 | P0-4/P2-1（watcher 补插值+patch）+ P0-5（写串行化）+ P1-6（disabled 级联）+ P1-7（组转换分级）+ P2-2（EntryPatcher 对齐）+ P2-9（删 EntryGroup） | 配置管线 |
+| P66 | P1-1..5（状态机竞态）+ D-7（门控 ACTIVE）+ P2-13（PENDING 语义+FAILED re-arm）+ P2-14（root effects）+ P2-16（属主校验） | 状态机与门控 |
+| P67 | D-2/D-3（UpdateEntry 合并+parent 语义）+ D-8（事件广播——破坏性测试改废）+ P2-6/7/8（嵌套 id/无 id/MoveEntry 回滚）+ P2-18（05 文档） | API 语义对齐 |
+| P68 | D-6（Provide 报错式+Set——破坏性，配 03 文档核校）+ P2 机械项（P2-5 结构键统一/P2-19/P2-21/LD-5 注释/P2-24..28/P2-29/30） | 服务语义+收尾 |
+| P69 | D-1（真热更新：不重编译原地通道）——独立 ADR + 最大单批 | 机制级 |
+
 ## 7. 与相邻文档的关系
 
 - 18 号：第一轮审计（已收敛）——本文验证其 11 项实施的实际完成度（发现 P0-1/2/3 落在 CA-3 未测路径）
