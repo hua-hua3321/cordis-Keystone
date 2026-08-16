@@ -48,7 +48,7 @@ created: 2026-08-16
 *第 1 步：统一键控存储（值层，进程内，不可分布式）*
 - `KeyedServiceStore`（自写 ~200 行纯内存簿记）：
   `ConcurrentDictionary<(name, realm), (value, ownerId)>`；热路径无锁读；冷路径 `Lock` 复合写（属主校验+写）；
-  **出锁后** fire `OnChanged((name, realm), Provided|Removed)`；`可用 = ContainsKey`（单一事实源）
+  **出锁后** fire `OnChanged(变更集)`（对齐 Cordis `notify(names[])` 批量语义：init 期 N 个 provide 合并唤醒，避免 N 次门控重评，P56）；`可用 = ContainsKey`（单一事实源）
 - `ContextFacade`：`_services` 从自建 `ServiceStore` → 引用共享 store；`Resolve` 改"算 realm + 查共享 store"；
   `Provide/RemoveOwnedServices` 带 realm；新增 realm 计算（沿链继承）
 - 清理：Provide 注册 effect disposer（删键 + Removed 通知），复用 EffectRegistry **推式**清理（无扫描器）
@@ -57,17 +57,24 @@ created: 2026-08-16
 *第 2 步：发现层抽象（元数据，可分布式——用户新增要求，接缝必须画此处）*
 - **值层不可分布式**：`KeyedServiceStore` 持**活 .NET 对象实例**（`ctx.Provide<T>` 的 `T`），Redis/Consul 存不了
 - **可分布式的只有发现元数据**（谁提供/可用性/端点）。抽象接缝 = 发现层，非值层：
-  - `IServiceDiscovery`（异步 + 元数据 payload + watch 通知 + 可选 TTL/租约）：
-    `RegisterAsync/LookupAsync/WatchAsync/UnregisterAsync(..., CancellationToken)`
+  - `IServiceDiscovery` **只读+通知，不含写**（P56 收窄：注册/注销生命周期已由 effect-disposer 覆盖，写路径走 store，
+    发现层再暴露 Register*/Unregister* = 浅接口）：`IsAvailable(name, realm)` + `Subscribe(change)`（+ 诊断用 `AvailableServices`）
+  - **同步契约**：`IsAvailable` 永远同步本地读——未来 Redis/Consul adapter 也是"本地缓存 + 后台同步"
+    （OnChanged→publish，远端 watch→更新缓存），网络永不上门控热路径；**今天零 async 感染**（P56）
   - 内存实现 = **投影** `KeyedServiceStore`（可用 = 键存在，零冗余状态）
   - 未来实现 = Redis pub/sub / Consul / etcd（同构 Steeltoe `IDiscoveryClient`、Aspire `IServiceEndpointProvider`）
 - 插件门控只消费 `IServiceDiscovery` → 未来换分布式实现，PluginRuntime/值 store **零改动**
+- **单 adapter 警示**（P56）：seam 今天只有一个 adapter，形状未经第二实现验证——对策 = 接口保持 2~3 成员
+  （未来 reshape 代价趋零）+ 契约（仅元数据/本地同步读/后台写同步）文档化于本节
 - 这修正了 P52 的"删 ServiceRegistry"表述：**不是删，是升格**——`IServiceRegistry` → `IServiceDiscovery`（可交换抽象），
   其内存实现从"独立冗余状态"改为"投影值 store"，单一事实源仍在
 
 *第 3 步：门控域感知（完整档，域维度落在发现层）*
 - `IServiceDiscovery` 的 name 带 realm；PluginRuntime 门控传本插件 realm；
   notify 域过滤 = `WatchAsync` 按 `(name, realm)` 精确订阅（对齐 Cordis notify filter）
+
+**实施序（P56 细化）**：第 0 步 schema+shim 纯配置层、零运行时涟漪，**可独立先行提交**；随后第 1+2 步一并落地
+（store + facade 改接 + 发现投影本就是一体）；第 3 步按需。每步 TDD + 全量回归 + AOT 冒烟 + 文档回写 + 独立提交
 
 **开放问题**：①事件投递是否也按域过滤 → 建议否（G15 scope 链已覆盖）；②完整档（registry 域感知）是否随第 1 步一起做，还是第 1+2 步先行（值域隔离 + 发现抽象），第 3 步按需——建议 1+2 先行
 

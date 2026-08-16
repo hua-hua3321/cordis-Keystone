@@ -156,6 +156,7 @@ created: 2026-08-15
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 | ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
 | ID-33 | 2026-08-16 | P38 | 静态插值双层形态（DC-8，ADR-0012）：YAML 整值标量走 tag 形态（!!env NAME/!!file path，YamlDotNet TagName）；文本内容内引用走冒号前缀形态（!!env:NAME）；缺失保留标记（tag 形态重构为 `!!env NAME` 字符串，不静默替换）；环检测 visited 改展开栈语义（add→递归→remove，同文件多处引用非环） | ADR-0012 tag 机制保留（YamlDotNet 自定义 tag）；字符串中间嵌入标记不支持（ADR 示例均为整值）；原实现 visited 只增不减（误报环） | `src/Keystone.Config/Interpolation/StaticInterpolator.cs`、`Entries/EntryParser.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-8） |
+| ID-52 | 2026-08-16 | P56 | **发现接口收窄 + 同步契约**：`IServiceDiscovery` 定稿为"只读+通知"（`IsAvailable(name,realm)+Subscribe`），删 Register*/Unregister*——写生命周期已由 effect-disposer 覆盖（Provide 注册删键 disposer），发现层重复暴露写方法 = 浅接口；`IsAvailable` 永远同步本地读，未来分布式 adapter 也是"本地缓存+后台同步"（OnChanged→publish / 远端 watch→缓存），网络永不上门控热路径——今天零 async 感染 | 教训：**seam 接口的胖瘦决定未来 reshape 成本**——单 adapter 的 seam 形状未经第二实现验证，唯一对策是接口保持 2~3 成员使 reshape 代价趋零，并把契约（仅元数据/本地同步读/后台写同步）写进文档；另证实现状 ServiceRegistry 锁内发事件靠 Monitor 同线程重入"侥幸成立"，跨线程即死锁——新 store 出锁通知是修复真实隐患 | `docs/architecture/18-cordis-code-parity-audit.md` | 否（随可行性复核轮） |
 | ID-51 | 2026-08-16 | P55 | **CA-1 决策收口 + 抽象接缝裁定**：①schema 裁定对齐 Cordis `Dict<name→true|"label">`（EntryOptions.Isolate 改 map + `IsolateSpec=Private|Shared(label)` + 列表 shim 迁移兼容）；②抽象化接缝——**值层（KeyedServiceStore 持活对象）进程内不可分布式，可分布式的是发现元数据**；故接缝画在发现层 `IServiceDiscovery`（异步 + 元数据 payload + watch + TTL），内存实现投影值 store（可用=ContainsKey 零冗余），未来 Redis/Consul/etcd 换实现零改动（同构 Steeltoe IDiscoveryClient、Aspire IServiceEndpointProvider）；③修正 P52"删 ServiceRegistry"为"升格"——IServiceRegistry → IServiceDiscovery 抽象，内存实现从独立冗余状态改为投影值 store，单一事实源不丢 | 教训：**抽象化前先分清"哪些状态天然进程内（活对象）vs 哪些可序列化分布（元数据）"**——把值层也抽象成可交换，Redis 实现无法兑现（存不了 .NET 实例），是错误抽象；.NET 生态先例（Steeltoe/Aspire）只抽象发现层，不抽象值层，印证接缝位置 | `docs/architecture/18-cordis-code-parity-audit.md`、`11-gap-register.md` | 否（随收口轮） |
 | ID-50 | 2026-08-16 | P54 | **隔离默认语义裁定（源码级）**：Cordis `Context` 构造 isolate 映射为空（context.ts:72 `Object.create(null)`），`provide` 对未隔离名回落到 root 默认符号 `Symbol(name)`（reflect.ts:290 `??=`）——**不写 isolate = 共享**；隔离仅显式 `isolate: {name: true}`（LocalRealm #entryId 私有）/`{name:"label"}`（GlobalRealm @label 命名共享）。据此推翻 01 §4"每实例独立子 IServiceProvider"、03 §2.2"整 scope 隔离保留为默认/每实例独立 scope 根"——这些是当年 MS.DI IServiceScope 类比硬套，与 Cordis 相悖。能力域实例默认 realm 裁定 = ""（共享），隔离走 isolate 显式声明 | 教训：**框架语义（默认值/隔离方向）必须回到上游源码裁定，不能被"设计期类比"固化**——01/03 的错误类比存在了数月未被发现，与 CA-9（grep 漏检）、CA-1（漏看 isolate.ts 数据模型）同源：都缺"回到上游完整形态复核"这一步 | `docs/architecture/01-overview.md`、`03-context.md`、`18-cordis-code-parity-audit.md` | 否（随语义裁定轮） |
 | ID-49 | 2026-08-16 | P53 | **决策批判修正**：①CA-1 漏判 schema 分叉——Cordis isolate 是 Dict<name→true|"label">（true=LocalRealm 条目私有域 #entryId / "label"=GlobalRealm 共享命名域 @label，isolate.ts 全文），Keystone 是列表（EntryParser.cs:92 StringList）且 08 §3 定位"组级"；此前"机制已有缺接线"结论只覆盖了运行时侧，未覆盖配置模型侧。②CA-3 并行缺陷——Keystone 门控有超时（DC-5 GatingDependencyTimeout，PluginRuntime.cs:285 不无限 PENDING），Cordis PENDING 无限等，组内全并行会让依赖兄弟的新条目伪超时。③CA-13 RebindPolicy 冗余（provider 重启已被 P25/P26 unload→re-register 链覆盖；owner 比对复现不了 epoch 的 fiber-uid 语义）。④CA-12 首步拆两阶段（默认 provider 先于 ServiceOptions）。⑤CA-6/7 与 ADR-0013 源抽象的张力 | 教训：**方案评审要回到上游事实的完整形态**（Cordis 字段是 map 不是 list——只看了 context.ts 的 isolate 方法签名，没看 loader/config/isolate.ts 的数据模型，导致方案建立在错误 schema 上） | `docs/architecture/18-cordis-code-parity-audit.md`（v3：§2 + §5.1） | 否（随批判轮） |
@@ -844,6 +845,17 @@ created: 2026-08-15
 | 2026-08-16 | W55-02 | 抽象接缝裁定：值层内存不可分布 / 发现层 IServiceDiscovery 可交换（Steeltoe/Aspire 先例佐证）+ ServiceRegistry 升格修正 | 裁定 | ID-51 | 同上 | — | ✅ |
 | 2026-08-16 | W55-03 | 18 §2 CA-1 终稿（四步方案 + 决策矩阵更新）+ 11 register 同步 | 文档 | R10 | 18/11 | frontmatter 校验通过；334/334 保持全绿 | ✅ |
 
+### 7.56 P56 CA-1 可行性复核（纯文档轮）
+
+> 代码事实验证可行性 + 接口深度优化。产出 = 18 §2 CA-1 第 1/2 步收窄 + 实施序细化。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-16 | W56-01 | 验证现状 `ServiceRegistry` **锁内发事件**（ServiceRegistry.cs:54/73）——现状靠 Monitor 同线程重入侥幸成立，跨线程/阻塞回调即死锁；KeyedServiceStore 出锁通知是修复非装饰 | 验证 | ID-52 | — | 源码行号证据 | ✅ |
+| 2026-08-16 | W56-02 | 发现接口收窄：删 Register*/Unregister*（写生命周期已由 effect-disposer 覆盖，重复暴露=浅接口），留 `IsAvailable + Subscribe(+AvailableServices)`；同步契约：本地同步读，网络在 adapter 后台 | 裁定 | ID-52 | 18 §2 第 2 步 | — | ✅ |
+| 2026-08-16 | W56-03 | 批量通知（对齐 Cordis `notify(names[])`）+ 实施序细化（schema+shim 零运行时涟漪先行独立提交） | 裁定 | ID-52 | 18 §2 第 1 步/实施序 | — | ✅ |
+| 2026-08-16 | W56-04 | 涟漪盘点：测试 19 refs/10 文件；EntryTree 合并触点（EntryTree.cs:55 `Isolate.Count>0` 三元）确认；AGENTS 状态行清欠（P54/P55 漏更） | 盘点 | R10 | AGENTS.md | frontmatter 校验通过；334/334 保持全绿 | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -980,6 +992,8 @@ created: 2026-08-15
 | ID-50 | 隔离默认语义裁定；推翻设计期类比 | `docs/`（01/03/18） | W54-01~02 |
 | W55-01~03 | ID-51 | `docs/architecture/18-cordis-code-parity-audit.md`、`11-gap-register.md` | 纯文档（无代码） |
 | ID-51 | CA-1 决策收口；抽象接缝裁定 | `docs/`（18/11） | W55-01~03 |
+| W56-01~04 | ID-52 | `18-cordis-code-parity-audit.md`、`AGENTS.md` | 纯文档（无代码） |
+| ID-52 | 发现接口收窄；同步契约；锁内发事件隐患证实 | `docs/`（18） | W56-01~03 |
 
 ## 9. 维护规则
 
