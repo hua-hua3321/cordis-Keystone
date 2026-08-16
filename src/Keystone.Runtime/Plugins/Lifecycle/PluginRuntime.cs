@@ -3,6 +3,8 @@ using Keystone.Core.Errors;
 using Keystone.Runtime.Context;
 using Keystone.Runtime.Plugins.Manifest;
 using Keystone.Runtime.Plugins.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Keystone.Runtime.Plugins.Lifecycle;
 
@@ -20,7 +22,7 @@ namespace Keystone.Runtime.Plugins.Lifecycle;
 /// D-7 提供者 ACTIVE 才放行依赖方（init 期 provide 暂存，ACTIVE 提交补发）；
 /// P2-16 provides 兑现 = 属主本人提供。
 /// </summary>
-public sealed class PluginRuntime : IAsyncDisposable
+public sealed partial class PluginRuntime : IAsyncDisposable
 {
     private readonly PluginManifest _manifest;
     private readonly Func<IPluginContext, IPlugin> _pluginFactory;
@@ -146,6 +148,24 @@ public sealed class PluginRuntime : IAsyncDisposable
             }
         }
     }
+
+    /// <summary>生命周期日志（P70-T5，ADR-0018 L1）：category = {域}/{插件 ID}（经插件 context 的
+    /// Logger）；context 未建（依赖等待期）回退 NullLogger——该期失败已由 PluginFailedFact 覆盖。</summary>
+    private ILogger Logger => _context?.Logger ?? NullLogger.Instance;
+
+    // CA1848：编译期委托（结构化字段：pluginId/errorType/message）
+    [LoggerMessage(EventId = 6101, Level = LogLevel.Information,
+        Message = "plugin '{pluginId}' started")]
+    private static partial void LogPluginStarted(ILogger logger, string pluginId);
+
+    [LoggerMessage(EventId = 6102, Level = LogLevel.Error,
+        Message = "plugin '{pluginId}' failed to initialize: {errorType}: {message}")]
+    private static partial void LogPluginFailed(
+        ILogger logger, string pluginId, string errorType, string message, Exception exception);
+
+    [LoggerMessage(EventId = 6103, Level = LogLevel.Information,
+        Message = "plugin '{pluginId}' stopped")]
+    private static partial void LogPluginStopped(ILogger logger, string pluginId);
 
     /// <summary>状态迁移事件（internal/status 对应物）。</summary>
     public event EventHandler<LifecycleStateChangedEventArgs>? StateChanged;
@@ -294,6 +314,7 @@ public sealed class PluginRuntime : IAsyncDisposable
             }
 
             await EmitLifecycleFactAsync(new Keystone.Runtime.Events.PluginStartedFact(_manifest.Id)).ConfigureAwait(false);
+            LogPluginStarted(Logger, _manifest.Id);
             CompleteSettled();
         }
         catch (Exception ex)
@@ -317,6 +338,7 @@ public sealed class PluginRuntime : IAsyncDisposable
         SetState(PluginLifecycleState.Failed);
         await EmitLifecycleFactAsync(
             new Keystone.Runtime.Events.PluginFailedFact(_manifest.Id, ex.Message)).ConfigureAwait(false);
+        LogPluginFailed(Logger, _manifest.Id, ex.GetType().Name, ex.Message, ex);
         CompleteSettled();
     }
 
@@ -558,6 +580,7 @@ public sealed class PluginRuntime : IAsyncDisposable
             SetState(PluginLifecycleState.Disposed);
         }
 
+        LogPluginStopped(Logger, _manifest.Id);
         CompleteSettled();
     }
 
