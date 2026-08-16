@@ -240,6 +240,13 @@ public sealed class KeystoneHost : IAsyncDisposable
         InsertEntry(_tree, entry, parent, position);
         if (entry.IsGroup)
         {
+            // CA-10（P58）：运行期建组 → 逐叶加载（不再是空壳组）；挂起继承 DC-16——
+            // EnumerateActiveLeaves([entry]) 含组自身 disabled 检查（disabled 组整树不加载）
+            foreach (var child in EnumerateActiveLeaves([entry]))
+            {
+                await LoadEntryAsync(child).ConfigureAwait(false); // 失败隔离语义沿用（叶 FAILED 不阻断兄弟）
+            }
+
             EntryInit?.Invoke(this, new EntryInitEventArgs(entry)); // 组条目无加载，显式触发
         }
         else
@@ -251,17 +258,24 @@ public sealed class KeystoneHost : IAsyncDisposable
         return id;
     }
 
-    /// <summary>删除条目（卸载插件 + 从树移除）。</summary>
+    /// <summary>删除条目（卸载插件 + 从树移除）。组条目 = 逆序逐叶级联卸载（CA-10，P58）。</summary>
     public async Task RemoveEntryAsync(string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
-        var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
-        if (hosted is not null)
+        // 树内条目：组 → 级联卸载；树外托管插件（H2 MountAsync 不进树）→ 直接卸载（宽容语义保持）
+        if (FindEntry(_tree, id) is { IsGroup: true } entry)
         {
-            EntryDisposing?.Invoke(this, new EntryDisposingEventArgs(id, active: true));
-            await hosted.Loader.DisposeAsync().ConfigureAwait(false);
-            _plugins.Remove(hosted);
+            // CA-10（P58）：删组 = 整子树卸载——逆序（后声明先卸，对齐 Cordis group remove 逐子卸载序）。
+            // 修复前只删树不卸插件 → 整组孤儿续跑（仅 ApplyConfigAsync 路径被 diff 扁平化间接弥补）
+            foreach (var leaf in EnumerateLeaves(entry.Group!).Reverse())
+            {
+                await DisposeHostedAsync(leaf.Id!).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            await DisposeHostedAsync(id).ConfigureAwait(false);
         }
 
         RemoveFromTree(_tree, id);
@@ -269,7 +283,23 @@ public sealed class KeystoneHost : IAsyncDisposable
         ScheduleWriteBack();
     }
 
-    /// <summary>跨组移动/排序（失败回滚：先校验目标组存在，再移动；position 指定插入位置）。</summary>
+    /// <summary>卸载已托管插件（EntryDisposing → loader.DisposeAsync → 移除托管记录）；未托管 = 无操作。</summary>
+    private async Task DisposeHostedAsync(string id)
+    {
+        var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
+        if (hosted is null)
+        {
+            return;
+        }
+
+        EntryDisposing?.Invoke(this, new EntryDisposingEventArgs(id, active: true));
+        await hosted.Loader.DisposeAsync().ConfigureAwait(false);
+        _plugins.Remove(hosted);
+    }
+
+    /// <summary>跨组移动/排序（失败回滚：先校验目标组存在，再移动；position 指定插入位置）。
+    /// 纯树操作：插件不重载不迁移——成员 context 链与 realm 谱系不变（CA-10 注明与 Cordis 差异：
+    /// Cordis 组移动重挂 fiber；Keystone 组只承载声明谱系，运行时拓扑不受移动影响）。</summary>
     public Task MoveEntryAsync(string id, string? newParent, int? position = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);

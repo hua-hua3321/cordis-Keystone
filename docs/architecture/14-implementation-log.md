@@ -910,6 +910,23 @@ created: 2026-08-15
 | W57-T6-03 | 文档回写：02 §3 键控服务改自建 KeyedServiceStore 实态（ID-50 修正：弃 MS.DI per-scope 类比；值生命周期替代子容器）；03 §2.1 实现备注更新 (name,realm) 键控 + §2.2 F10 标 P57-T5；09 启动流步骤 6 带生效 realm；10 接口注释带 realm 语义与 provides 兑现契约；11 G7 → 已实施；18 CA-1 标题标 ✅ 已实施 | 文档 | frontmatter 校验通过 | ✅ |
 | W57-T6-04 | AGENTS 状态行收口（CA-1 实施完成）+ 最终提交 | 文档 | — | ✅ |
 
+### 7.58 P58 CA-10 组条目 CRUD 级联（TDD）
+
+> 目标：按 18 §2 CA-10 提案修唯一 P0 正确性——删组孤儿泄漏 + 建组空壳。每步 TDD 红→绿 + 全量回归 + AOT 冒烟 + 文档回写 + 独立提交。
+
+| 任务 | 目标（严禁简化） | 影响范围 | 验收标准 | 状态 |
+|------|----------------|---------|---------|------|
+| T1 级联实现 | RemoveEntryAsync(组id) 逆序逐叶级联卸载（修孤儿）+ CreateEntryAsync 组路径逐叶加载（修空壳，挂起继承 DC-16）+ 抽 DisposeHostedAsync + MoveEntryAsync 差异注明 | KeystoneHost（RemoveEntryAsync/CreateEntryAsync/新 DisposeHostedAsync）+ Hosting.Tests | 5 新测试红→绿（组删级联+逆序序+树无残留/叶删不连坐/带子组建组逐叶 Active/挂起组不加载子叶/组移动纯树零重载）；全量回归；AOT；提交 | ✔ 2026-08-16 |
+
+#### T1 执行记录（2026-08-16）
+
+| # | 内容 | 方式 | 验证 | 状态 |
+|---|------|------|------|------|
+| W58-T1-01 | 红测试 5 个（GroupCrudCascadeTests）：初红 2/5（组删孤儿 + 建组空壳两核心缺陷），3 保护项（叶删不连坐/挂起组跳过/组移动纯树）先绿锁定既有语义 | TDD | filter 跑 2 Failed | ✅ |
+| W58-T1-02 | CreateEntryAsync 组路径 EnumerateActiveLeaves([entry]) 逐叶 LoadEntryAsync（含组自身 disabled 检查 → 挂起组整树不加载；失败隔离语义沿用）；RemoveEntryAsync：树内组 → EnumerateLeaves 逆序逐叶 DisposeHostedAsync；抽 DisposeHostedAsync（EntryDisposing → loader.DisposeAsync → 移除托管）；MoveEntryAsync 注明与 Cordis 差异（纯树操作，fiber 不重挂） | 实现 | 5/5 绿 | ✅ |
+| W58-T1-03 | 修复引入的语义回归：MountAsync（H2 编程式挂载）不进树——RemoveEntryAsync 初版 FindEntry 空检查误伤树外托管插件卸载（MountAsync_programmatic 测试红）；改宽容语义（仅树内组走级联解析，树外直接卸载） | 修复 | MountAsync 测试恢复绿 | ✅ |
+| W58-T1-04 | 全量回归 382/382（Hosting 57→62：+5）；Hosting AOT 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |

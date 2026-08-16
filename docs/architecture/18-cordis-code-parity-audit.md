@@ -155,7 +155,7 @@ created: 2026-08-16
 
 **解决方案**：disposer 改为 `async`：Cancel 后 `await _runTask`（构造时保存 RunLoop 任务引用；`try/catch` 全吞）；`DisposeAsync` 移除 `_cts.Dispose()`（Cancel 已足够释放等待者，CTS finalizable 无压力——消除竞态源头）。TDD：卸载后 RunLoop 无未观察异常（TaskScheduler.UnobservedTaskException 探针或直接代码审查凭证）；卸载 await 完成后无在途回调（计数器断言）。
 
-### CA-10 组条目 CRUD 级联（**唯一 P0 正确性**，M）
+### CA-10 组条目 CRUD 级联（**唯一 P0 正确性**，M）——✅ 已实施（P58，2026-08-16；见 14 §7.58：组删逆序级联卸载 + 建组逐叶加载 + Move 纯树差异注明）
 
 **研判**：tree.ts:97-112 组 create 加载整子树并 await；group.ts:48-57 remove 逐子卸载。Keystone：
 - `RemoveEntryAsync` 只 Dispose 精确匹配 EntryId 的**叶子**插件——`RemoveEntryAsync(组id)` 从树删除组但**整组插件继续运行**（孤儿）。仅 `ApplyConfigAsync` 路径因 ConfigDiffer.Flatten 扁平化间接弥补；直接调 API（嵌入方管理面）必泄漏
