@@ -31,8 +31,8 @@ community members.
 **Get the code**
 
 ```bash
-git clone https://github.com/hua-hua3321/cordis-csharp.git
-cd cordis-csharp
+git clone https://github.com/hua-hua3321/cordis-Keystone.git
+cd cordis-Keystone
 dotnet restore cordis-csharp.slnx
 ```
 
