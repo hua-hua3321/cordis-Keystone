@@ -1,4 +1,5 @@
 using Keystone.Config.Entries;
+using Microsoft.Extensions.Logging;
 using Keystone.Config.Validation;
 using Keystone.Core.Errors;
 using Keystone.Runtime.Actors;
@@ -27,6 +28,8 @@ public sealed class KeystoneHost : IAsyncDisposable
     private Keystone.Runtime.Persistence.FactRetentionScheduler? _retention; // DC-18：定时 Prune
     private ConfigFileWatcher? _configWatcher; // DC-9：配置文件监听
     private volatile bool _applyingConfig; // DC-9：apply 串行化（watcher 首扫与初始化防竞态交错）
+    private Keystone.Runtime.Logging.RingBufferLoggerProvider? _ringBufferLogs; // CA-12：ServiceOptions logger 接线产物（诊断面）
+    private Microsoft.Extensions.Logging.ILoggerFactory? _ownedLoggerFactory; // CA-12：自建 factory（Create 静态类型即接口；Shutdown 经此字段 Dispose）
     private CapabilityDomain? _capabilityDomain;
     private IReadOnlyList<string> _uncollectedPlugins = [];
     private bool _shutdown;
@@ -52,6 +55,67 @@ public sealed class KeystoneHost : IAsyncDisposable
     // ── 启动 / 关闭 ──
 
     /// <summary>8 步启动（09 §2）：解析条目 → schema 校验 → manifest 校验 → 根 context → 并行加载（门控拓扑）→ 就绪。</summary>
+    /// <summary>文件入口启动（CA-6，P60，对齐 Cordis include Service.init ENOENT+initial 先写再读）：
+    /// 要求 ConfigFilePath 已配置——文件不存在且 <see cref="KeystoneHostOptions.InitialEntries"/> 非空 →
+    /// 写入 initial 再读；文件已存在 → initial 忽略（现网配置优先）；两者皆无 → 明确报错。</summary>
+    public async Task StartFromFileAsync()
+    {
+        ThrowIfShuttingDown();
+        var path = _options.ConfigFilePath
+            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed,
+                "ConfigFilePath is not configured — no file to start from");
+
+        if (!File.Exists(path))
+        {
+            if (_options.InitialEntries is not { Count: > 0 } initial)
+            {
+                throw new KeystoneException(ErrorCode.ConfigValidationFailed,
+                    $"config file not found and no InitialEntries configured: {path}");
+            }
+
+            _configWriter ??= new Keystone.Config.Persistence.ConfigFileWriter(path);
+            await _configWriter.EnsureInitialAsync(initial).ConfigureAwait(false); // 存在则跳过（幂等）
+        }
+
+        var yaml = await File.ReadAllTextAsync(path).ConfigureAwait(false);
+        await StartAsync(yaml).ConfigureAwait(false);
+    }
+
+    /// <summary>ServiceOptions["logger"] → RingBufferLoggerProvider 工厂（CA-12，P60）：
+    /// { defaultLevel, capacity, levels: {category→level} }；显式 LoggerFactory 优先时不会被调用。</summary>
+    private Microsoft.Extensions.Logging.ILoggerFactory? BuildServiceLoggerFactory()
+    {
+        if (_options.ServiceOptions is null
+            || !_options.ServiceOptions.TryGetValue("logger", out var loggerOptions))
+        {
+            return null; // 无服务选项 → 保持 NullLoggerFactory 兜底（现状）
+        }
+
+        var capacity = loggerOptions.TryGetValue("capacity", out var capacityValue)
+            && int.TryParse(capacityValue?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var parsedCapacity) ? parsedCapacity : 1000;
+        var defaultLevel = loggerOptions.TryGetValue("defaultLevel", out var defaultLevelValue)
+            && Enum.TryParse<Microsoft.Extensions.Logging.LogLevel>(defaultLevelValue?.ToString(), out var parsedLevel)
+            ? parsedLevel
+            : (Microsoft.Extensions.Logging.LogLevel?)null;
+        var overrides = new Dictionary<string, Microsoft.Extensions.Logging.LogLevel>(StringComparer.Ordinal);
+        if (loggerOptions.TryGetValue("levels", out var levelsValue)
+            && levelsValue is IReadOnlyDictionary<string, object?> levels)
+        {
+            foreach (var (category, levelValue) in levels)
+            {
+                if (Enum.TryParse<Microsoft.Extensions.Logging.LogLevel>(levelValue?.ToString(), out var level))
+                {
+                    overrides[category] = level;
+                }
+            }
+        }
+
+        _ringBufferLogs = new Keystone.Runtime.Logging.RingBufferLoggerProvider(
+            capacity, overrides, sinks: null, defaultLevel);
+        _ownedLoggerFactory = LoggerFactory.Create(builder => builder.AddProvider(_ringBufferLogs));
+        return _ownedLoggerFactory;
+    }
+
     public Task StartAsync(string configYaml)
     {
         ArgumentNullException.ThrowIfNull(configYaml);
@@ -90,9 +154,12 @@ public sealed class KeystoneHost : IAsyncDisposable
         // 4-5. 根 context（能力域 context 挂其下，03 §1）+ 能力域（01 §2 管理层职责，09 §2）
         // DC-11：根总线携带事实存储——插件 context（子链共享总线）的生命周期事实自动持久化
         // DC-20：根 context 接 LoggerFactory + 域前缀（category = {域}/{插件 ID}，05 §5）
+        // CA-12（P60）：未注入 LoggerFactory 且 ServiceOptions["logger"] 存在 → RingBuffer 接线
+        // （修复：provider 构造一直支持 overrides/defaultLevel/capacity 但无人接线——NullLogger 兜底绕过）
+        var loggerFactory = _options.LoggerFactory ?? BuildServiceLoggerFactory();
         _rootContext = new ContextFacade(
             "root",
-            loggerFactory: _options.LoggerFactory,
+            loggerFactory: loggerFactory,
             eventStore: _options.EventStore,
             logCategoryPrefix: _options.EnableCapabilityDomain ? _options.CapabilityDomainName : null);
         _discovery = new InMemoryServiceDiscovery(_rootContext.Services); // 发现层投影（P57-T4）
@@ -178,6 +245,15 @@ public sealed class KeystoneHost : IAsyncDisposable
             await _capabilityDomain.DisposeAsync().ConfigureAwait(false);
             _capabilityDomain = null;
         }
+
+        DisposeOwnedLoggerFactory(); // CA-12：自建 factory（ServiceOptions 产物）
+    }
+
+    /// <summary>释放自建 logger factory（CA-12：ServiceOptions 接线产物；嵌入方注入的不归本宿主管）。</summary>
+    private void DisposeOwnedLoggerFactory()
+    {
+        _ownedLoggerFactory?.Dispose();
+        _ownedLoggerFactory = null;
     }
 
     /// <summary>关闭超时未收敛的插件（诊断审计，09 §4 第 6 步）。</summary>
@@ -360,6 +436,10 @@ public sealed class KeystoneHost : IAsyncDisposable
             ?? throw new KeystoneException(ErrorCode.GatingServiceNotFound, $"plugin not loaded: {entryId}");
         return hosted.Loader.Runtime.State;
     }
+
+    /// <summary>环形缓冲日志 provider（CA-12：ServiceOptions["logger"] 接线产物；未接线 = null）。
+    /// 诊断入口：<see cref="Keystone.Runtime.Logging.RingBufferLoggerProvider.GetSnapshot"/>。</summary>
+    public Keystone.Runtime.Logging.RingBufferLoggerProvider? RingBufferLogs => _ringBufferLogs;
 
     // ── H2 编程式挂载 ──
 

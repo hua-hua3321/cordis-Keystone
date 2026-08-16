@@ -117,7 +117,7 @@ created: 2026-08-16
 2. `KeystoneHostOptions.ConfigPatches`；`StartAsync` 解析后、校验前应用（patch 后的树才进 manifest 校验——对齐 Cordis patch 在 schema 前生效）
 3. TDD：插入组/插入根/覆盖 config/name 不匹配跳过且 warn 回调触发/空 patches 恒等
 
-### CA-6 initial 引导接线（P1，S）
+### CA-6 initial 引导接线（P1，S）——✅ 已实施（P60-T1，2026-08-16；见 14 §7.60：InitialEntries + StartFromFileAsync，EnsureInitialAsync 死代码激活）
 
 **研判**：include Service.init ENOENT+initial → 先写再读。Keystone `EnsureInitialAsync` 是死代码（宿主零调用）且 `KeystoneHostOptions` 无 initial 选项。**注意**：现 `StartAsync(string)` 收 yaml **文本**而非路径（文件读取在嵌入方）——接线需要一个文件入口。
 
@@ -174,7 +174,7 @@ created: 2026-08-16
 
 **解决方案**：补 ADR（并入 ADR-0016 或独立）记录弃用理由；若未来出现纯配置内建件（如内建 telemetry 条目），启用 `keystone:` 前缀约定 + LocalPluginSource 内置 root。**建议弃用，审核时定。**
 
-### CA-12 服务级配置合并链（intercept 对应物）（P1，M）
+### CA-12 服务级配置合并链（intercept 对应物）（P1，M）——✅ 已实施（P60-T2，2026-08-16；见 14 §7.60：ServiceOptions 宿主级一层 + 日志首例 RingBuffer 接线；多层 merge 按开放问题裁定不做）
 
 **研判**：Cordis `ctx.intercept(name,config)` 原型链逐级 merge + `Service.resolveConfig(base,head)`（context.ts:139-147、service.ts:95-110）。Keystone 代码事实：
 - 插件 config 有过滤器链（ConfigResolver 可否决）+ get/set 拦截（IContextInterceptor）——**服务级选项无宿主入口**

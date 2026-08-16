@@ -87,4 +87,14 @@ public sealed class KeystoneHostOptions
 
     /// <summary>全局关闭超时（09 §4 第 6 步：超时强制退出 + 记录未收敛插件；默认 30s）。</summary>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>initial 引导条目（CA-6，P60，对齐 Cordis include initial）：
+    /// <see cref="KeystoneHost.StartFromFileAsync"/> 时配置文件不存在 → 写入这些条目再启动；
+    /// 文件已存在 → 忽略（现网配置优先）。null/空 = 无引导。</summary>
+    public IReadOnlyList<EntryOptions>? InitialEntries { get; set; }
+
+    /// <summary>服务级选项（CA-12，P60，intercept 对应物·宿主级一层）：服务名 → 选项字典。
+    /// 日志首例："logger" → { defaultLevel, capacity, levels: {category→level} }——
+    /// 未注入 LoggerFactory 时构造 RingBufferLoggerProvider（显式 LoggerFactory 优先，不覆盖嵌入方）。</summary>
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>>? ServiceOptions { get; set; }
 }

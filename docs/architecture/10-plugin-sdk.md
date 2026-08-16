@@ -81,6 +81,8 @@ public interface IPluginContext
 
 **计时器随插件生命周期回收**（补充排查 N3）：所有计时器注册进当前 fiber，插件卸载（quiesce）时自动取消/排空——插件作者不需要手动清理，与 Cordis `@cordisjs/plugin-timer` 语义一致。
 
+**服务级选项消费定式**（CA-12，P60，intercept 对应物）：宿主经 `KeystoneHostOptions.ServiceOptions` 配服务选项（服务名 → 选项字典；日志首例 `"logger"`）。服务收到选项包后**自行绑定**：插件侧 `Options.Create<T>(...)` 编译期泛型（规则 0 第 5 条），框架不做反射式绑定。日志无需插件操心——`context.Logger` 已按 `levels.{category}` / `defaultLevel` 三级阈值过滤（RingBufferLoggerProvider 接线）。
+
 ## 5. 事件订阅与插件生命周期绑定
 
 - `Subscribe*` 返回的 disposer 也可手动调用；不手动调用则随插件卸载自动摘除（03-context §7）

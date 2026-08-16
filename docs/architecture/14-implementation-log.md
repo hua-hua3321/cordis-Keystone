@@ -946,6 +946,24 @@ created: 2026-08-15
 | W59-04 | 中途修正：初版阶段级收集致同批第二失败被吞（AggregateException 只剩 1 因）——改逐条目粒度收集（对齐 Cordis allSettled）；测试自身 bug：同 id 坏源×2 在 YAML 解析期被拦（fail-fast 先于应用层）→ 改双 id | 修复 | 双失败聚合 2 内因 | ✅ |
 | W59-05 | 全量回归 390/390（Hosting 62→70：+8）；Hosting AOT 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
 
+### 7.60 P60 CA-6 initial 引导 + CA-12 服务级选项（TDD）
+
+> 目标：按 18 §2 提案实施 P1 收尾两项。TDD 红→绿 + 全量回归 + AOT 冒烟 + 文档回写 + 独立提交。
+
+| 任务 | 目标（严禁简化） | 影响范围 | 验收标准 | 状态 |
+|------|----------------|---------|---------|------|
+| T1 CA-6 initial 接线 | InitialEntries 选项 + StartFromFileAsync()：无文件+initial → EnsureInitialAsync 写入再启动；文件存在 → 忽略；皆无 → 报错 | KeystoneHostOptions + KeystoneHost（StartFromFileAsync） | 4 新测试（写入并启动/已存在不覆盖/皆无报错/无路径报错） | ✔ 2026-08-16 |
+| T2 CA-12 服务级选项 | ServiceOptions（服务名→选项字典）+ 日志首例接线：未注入 LoggerFactory 且 ServiceOptions["logger"] → RingBufferLoggerProvider（capacity/defaultLevel/levels）替代 NullLogger 兜底；显式 LoggerFactory 优先；自建 factory Shutdown 释放 | KeystoneHostOptions + KeystoneHost（BuildServiceLoggerFactory/RingBufferLogs 诊断面/DisposeOwnedLoggerFactory） | 4 新测试（levels 过滤/defaultLevel/显式工厂优先/无选项现状保持） | ✔ 2026-08-16 |
+
+#### T1-T2 执行记录（2026-08-16）
+
+| # | 内容 | 方式 | 验证 | 状态 |
+|---|------|------|------|------|
+| W60-01 | 红测试 8 个：InitialBootstrapTests 4（初红：InitialEntries/StartFromFileAsync 不存在）+ ServiceOptionsLoggerTests 4（初红：ServiceOptions/RingBufferLogs 不存在） | TDD | 构译期红 24 错 | ✅ |
+| W60-02 | CA-6 实现：StartFromFileAsync（ConfigFilePath 必配；EnsureInitialAsync 复用 Config 层既有死代码——本接线后激活）；CA-12 实现：BuildServiceLoggerFactory（capacity/defaultLevel/levels 解析 + RingBufferLoggerProvider 构造）+ RingBufferLogs 诊断属性 + DisposeOwnedLoggerFactory（CA2000 生命周期闭环） | 实现 | 8/8 绿 | ✅ |
+| W60-03 | 测试侧修正：插件源补 using Microsoft.Extensions.Logging（LogDebug/LogError 扩展方法）；多余 using 清理 | 修复 | — | ✅ |
+| W60-04 | 全量回归 398/398（Hosting 70→78：+8）；Hosting AOT 零 IL；10 §4 服务消费定式写入；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |
