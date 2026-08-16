@@ -123,6 +123,7 @@ created: 2026-08-15
 
 | 编号 | 日期 | 阶段 | 决定 | 理由 | 影响面 | 升级 ADR |
 |------|------|------|------|------|--------|---------|
+| ID-50 | 2026-08-16 | P72 | **两类配置的动态语义契约**（Cordis fiber.ts 参照裁定）：①框架配置（FrameworkSettings/Watcher/Writer/ResultCache 等）**启动快照、启动后不可变**——StartAsync 定格，三处 CreateAsync 统一用快照（消除冷重载读活值 vs 热更新复用旧快照的分叉）；②插件配置实时变化全链对齐 Cordis fiber.update——已对齐面（resolve-before-restart / PatchContext 瀑布否决 ≈ internal/update / 每次激活重解析 / PENDING 存新值延迟激活 / runtime-FAILED 重试）维持；补齐唯一缺口：**未托管条目（启动期校验/编译失败）收到新配置 → 重试全量加载**（对齐 fiber.ts:726-733 非 ACTIVE re-arm），disabled 挂起保持只改树 | 框架旋钮冻结符合 .NET 生态惯例（OTel/providers 均启动快照）且用户裁定；插件 re-arm 是 Cordis 明确语义（配置修复即自动重试，无需人工 reload） | `src/Keystone.Hosting/KeystoneHost.cs`（快照字段+助手 / UpdatePluginInPlaceAsync re-arm / LoadEntryAsync 恢复出口）、`KeystoneHostOptions.cs`（契约注释） | 否（ID 级——契约注记已入 XML doc） |
 | ID-01 | 2026-08-15 | P3 | 门控扫描事件驱动而非轮询 | 对齐 ADR-0007 服务可用性事件；避免轮询延迟/开销 | DependencyGate 内部 | |
 | ID-02 | 2026-08-15 | P0 | 框架品牌名定为 **Keystone**（cordis-csharp 保留为仓库内部代号） | 独立地基框架定位：不占用上游 Cordis 名义（市场分析共识，用户拍板）；Keystone=基石隐喻贴合地基定位 | 全部命名空间/程序集/包名/配置节名/文档自称 | 否 |
 | ID-03 | 2026-08-15 | P1 | 序列化信封与接口层分离：TaskRequest（含 object? Payload + CT，运行态）与 TaskEnvelope（[MessagePackObject]，PayloadBytes 字节承载）分置 | 规则 0 第 3 条：MessagePack 源生成不支持任意 object 多态；具体载荷类型由能力域契约序列化（06 §6） | Contracts 命名空间 | 否 |
@@ -1163,6 +1164,17 @@ created: 2026-08-15
 | W71-01 T1 FrameworkSettings 接线（P0） | 修复配置断线：KeystoneHostOptions.FrameworkSettings（可直接赋值或经 Bind 从 keystone 节绑定）→ PluginLoader.CreateAsync → PluginRuntime（含 D-1 原地热更重建保持同值）；宿主三处 CreateAsync 下传。死字段处置：删 PluginDirectory/DefaultConcurrency/LogLevel（零消费者；日志配置唯一面 = ServiceOptions["logger"]） | KeystoneHostOptions.cs / KeystoneHost.cs / PluginLoader.cs / KeystoneSettings.cs | FrameworkSettingsWiringTests 2 例（断言级红：依赖超时实测 30s→300ms / quiesce 6s 自然完成→200ms 强制收敛）；KeystoneSettingsTests 改 2 字段；492/492；Runtime+Hosting AOT 零 IL | ✔ |
 | W71-02 T2 硬编码入配置面（P1） | 7 处可调值全部入配置（默认不变，向后兼容）：WatcherOptions（config/plugin 防抖 100ms）；ConfigWriterOptions → ConfigFileWriter 构造参数（占用重试 10/拒绝退避 3/防抖 50ms/退避步长 50ms）；KeystoneHostOptions.ResultCacheCapacity（1024）→ Domain.Create/Spawn → CapabilityActor（DC-13 FIFO 上限） | WatcherOptions.cs（新）/ ConfigWriterOptions.cs（新）/ KeystoneHostOptions.cs / ConfigFileWatcher.cs / PluginFileWatcher.cs / ConfigFileWriter.cs / CapabilityDomain.cs / CapabilityActor.cs | WriterOptionsTests 2 例（"after 2 attempts" 消息 + WriteAttempts==3 / 1ms 防抖立即落盘）+ WatcherOptionsWiringTests 2 例（探针 123ms/234ms）+ ResultCacheCapacityTests 1 例（容量 2 淘汰重执行 3→4）；497/497；Runtime/Config/Hosting AOT 零 IL | ✔ |
 
+### 7.67 P72 配置动态语义批（Cordis fiber.update 对齐 + 框架冻结契约，ID-50）
+
+> 起点：用户问"配置动态变化已应用处能否感知"。裁定：框架配置启动后不可变（冻结契约）；
+> 插件配置对齐 Cordis fiber.ts 逐条核实。结论：五个面已对齐（P65/P69/D-1/G-C8 既有成果），
+> 唯一缺口 = 未托管条目的配置修复 re-arm。
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| T1 配置修复 re-arm（P1） | 对齐 fiber.ts:726-733 update() 非 ACTIVE 路径：启动期校验失败（_failedEntries）/编译失败（未建 loader）的条目收到新配置 → 重试全量 LoadEntryAsync（Cordis：清错误重新激活）；LoadEntryAsync 校验通过后 _failedEntries.Remove（恢复出口）；disabled（自身/祖先挂起）保持只改树 | KeystoneHost.cs（UpdatePluginInPlaceAsync / LoadEntryAsync） | ConfigRearmTests 2 例（Failed→配置修复→Active + disabled 守卫保持未加载）；500/500 | ✔ |
+| T2 框架配置启动冻结（P1） | StartAsync 快照 FrameworkSettings；三处 CreateAsync（直载/冷重载/条目加载）统一用快照（FrameworkSettingsEffective 助手）——消除冷重载读活值 vs 热更新复用旧快照的分叉（stash 红检验实测 56.7ms 强制收敛 = 读到活值）；契约写入 KeystoneHostOptions XML doc | KeystoneHost.cs / KeystoneHostOptions.cs | FrameworkSettingsFreezeTests 1 例（启动后改 50ms → 冷重载+热更新收敛仍按启动 10s 等 6s 自然完成，耗时断言 > 3s）；500/500；Hosting AOT 零 IL | ✔ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -1304,6 +1316,7 @@ created: 2026-08-15
 | W70-01 | ADR-0018；05 §5 | `src/Keystone.Hosting/KeystoneHost.cs`、`src/Keystone.Runtime/Trace/`、`src/Keystone.Runtime/Actors/`、`src/Keystone.Runtime/Plugins/Loading/PluginLoader.cs` | ObservabilityWiringTests(2) + ActorObservabilityTests(5) + ConfigObservabilityTests(4) + Trace 迁移(3) |
 | W70-02 | ADR-0018；05 §5 | `src/Keystone.Hosting/KeystoneHost.cs`、`src/Keystone.Runtime/Actors/CapabilityActor.cs`、`src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`src/Keystone.Runtime/Events/ActorStoppedFact.cs`、`src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | ObservabilityWiringTests(+2) + ActorObservabilityTests(+3) + PluginLifecycleLoggingTests(2) |
 | W71 | ADR-0013；AGENTS.md 项目定位（禁止硬编码） | `src/Keystone.Core/KeystoneSettings.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs`、`src/Keystone.Hosting/KeystoneHost.cs`、`src/Keystone.Hosting/WatcherOptions.cs`、`src/Keystone.Hosting/ConfigWriterOptions.cs`、`src/Keystone.Runtime/Plugins/Loading/PluginLoader.cs`、`src/Keystone.Config/Persistence/ConfigFileWriter.cs`、`src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`src/Keystone.Runtime/Actors/CapabilityActor.cs` | FrameworkSettingsWiringTests(2) + WriterOptionsTests(2) + WatcherOptionsWiringTests(2) + ResultCacheCapacityTests(1) |
+| W72 | ID-50；Cordis fiber.ts update()（vendor 源码参照） | `src/Keystone.Hosting/KeystoneHost.cs`（快照/re-arm/恢复出口）、`src/Keystone.Hosting/KeystoneHostOptions.cs` | ConfigRearmTests(2) + FrameworkSettingsFreezeTests(1) |
 
 ## 9. 维护规则
 
