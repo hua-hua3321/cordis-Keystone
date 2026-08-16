@@ -26,17 +26,24 @@ created: 2026-08-16
 
 ### CA-1 isolate 服务隔离：配置接线 + 门控域感知（P1，M）
 
-**研判（含修正）**：
-- Cordis：`ctx.isolate(name, label)` per-service 域（context.ts:121-135）+ notify 按域过滤（reflect.ts:314）
+**研判（含两轮修正）**：
+- Cordis 事实（isolate.ts 全文）：`isolate` 是 **`Dict<name → true|"label">` 两档域**，非列表——
+  - `true` = `LocalRealm`（条目**私有**域，suffix `#entryId`）：每个条目独占该服务 scope
+  - `"label"` = `GlobalRealm`（**共享**命名域，suffix `@label`）：同 label 的条目共享该服务 scope
+  - per-entry 应用（entry.options.isolate），经 `loader/patch-context` 钩子生成 isolate map（原型链继承父），`reflect.store` 按 symbol 键存取，notify 按域符号相等过滤
 - Keystone 代码事实：
-  - `ContextFacade` 每 context 独立 `_services` 存储；`Resolve` 沿父链查（ContextFacade.cs:88-99）；`Provide` 写公共 root（组合语义，:103-117）。**类注释已声明"isolate 隔离经独立 context 链天然达成（不共享父）"——运行时机制存在**
-  - 缺口①（配置）：`LoadEntryAsync/ReloadPluginAsync/MountAsync` 一律 `new ContextFacade(id, _rootContext)`（KeystoneHost.cs:342/374/561）——`EntryOptions.Isolate` 解析后零消费
-  - 缺口②（门控）：`IServiceRegistry` 宿主级单例按服务名 Register/IsAvailable（IServiceRegistry.cs）——无域概念；隔离域提供者不注册则依赖方永 PENDING，注册了则非隔离插件误判可用
-- **修正后定性**：非"完全未实现"，是"机制已有 + 配置未接线 + 门控域感知缺口"
+  - `EntryOptions.Isolate` 是 `IReadOnlySet<string>`（EntryOptions.cs:25），EntryParser.cs:92 按**列表** `StringList(map, "isolate")` 解析；08 §3 定位"**组级**服务隔离"——**配置 schema 与 Cordis 的 map 两档模型从解析层就分叉**（不是单纯"缺接线"）
+  - 运行时机制确实已有：`ContextFacade` 每 context 独立 `_services` + `Resolve` 沿父链 + `Provide` 写公共 root（组合语义，ContextFacade.cs:88-117）；类注释"独立链=天然隔离"
+  - 门控 `IServiceRegistry` 宿主级单例无域概念（IServiceRegistry.cs）
+- **修正后定性**：三层缺口——①schema 分叉（列表 vs map 两档）；②配置未接线（三处 context 工厂一律挂 root）；③门控无域感知。其中 ① 是**设计决策**（08 §3 故意简化），需先定 schema 去留
 
-**解决方案（分层，审核选档）**：
+**解决方案（三步，第 0 步是 schema 决策——先于任何接线）**：
 
-*最小档（值域隔离，门控保持全局）*：
+*第 0 步：schema 决策（审核二选一）*
+- 方案 A（对齐 Cordis）：`isolate` 改 `Dict<name → true|"label">`——保留两档域语义（私有/共享）；EntryParser 改映射解析；工作量 +S；收益 = 上游配置可平移、多实例同服务名两档表达完整
+- 方案 B（保留 Keystone 简化）：`isolate` 维持列表，语义收窄为"条目私有域"（列表内名字一律按 LocalRealm 语义）；补 08 §3 注记"不实现 GlobalRealm 共享标签（多实例共享域场景由 inject+组合语义覆盖）"；工作量最小
+
+*最小档（值域隔离，门控保持全局）*（方案 B 前提下）：
 1. `ContextFacade` 构造增 `ISet<string>? isolateNames = null`（沿链继承合并）；`Resolve`：名字在隔离集 → 只查本域链（不越隔离边界）；否则现状（本域→父链→root）。`Provide`：名字在隔离集 → 写本地 `_services`（ownerId=Name）；否则写 root（组合语义不变）
 2. 宿主：`GetOrCreateIsolateContext(IReadOnlySet<string> isolate)` 按"排序后集合"键缓存隔离 base context（父 = root，携 isolateNames）；三处 context 工厂按 `entry.Isolate` 分流
 3. **限制（须注明）**：门控仍按全局 registry——隔离服务的可用性事件全局可见，非隔离插件可能门控放行后 `Get` 落空（GatingServiceNotFound）；隔离插件 inject 隔离服务时门控看不到本域提供者 → 永久 PENDING。**适用前提：隔离服务不参与跨域 inject 门控**（自用型服务）
@@ -61,8 +68,8 @@ created: 2026-08-16
 
 **研判**：group.ts:59-118 全事务语义（allSettled 并行/单错抛因/多错 AggregateError/逆序回滚新建+重建旧/回滚失败聚合/"Disposal owns termination"）。Keystone `ApplyConfigAsync` 顺序、首错中断、无回滚。**但 diff 增量模式下回滚面更小**（旧条目未动无需重建，只需撤销本次新增/变更）。
 
-**解决方案**：
-1. `ApplyConfigAsync` 分组化：diff.Added/ConfigChanged/StructurallyChanged 按**所属组**分桶；桶内 `Task.WhenAll` 并行（不同组天然无依赖，同组内也并行——对齐 Cordis），桶间顺序（根桶最后，模拟"组先于依赖"）
+**解决方案**（含 P53 复核修正——并行有门控超时隐患）：
+1. `ApplyConfigAsync` 分组化：diff 按**所属组**分桶。**并行策略修正**：Keystone 门控有超时（DC-5 GatingDependencyTimeout——不无限 PENDING，PluginRuntime.cs:285），Cordis PENDING 无限等——组内全并行会让"依赖兄弟条目的新条目"在等待窗口内伪超时失败。故：**组内按 inject 依赖拓扑分层**（无依赖的叶并行，依赖者等被依赖者 Active 后再起）；或组事务期间对本次新建条目放宽/豁免门控超时。桶间顺序（根桶最后）
 2. 失败聚合：收集 Exception 列表——1 个抛原因、多个抛 `AggregateException`；**回滚**：逆序撤销本次已成功的变更（Added→RemoveEntryAsync；ConfigChanged→UpdatePluginAsync(旧 config)；StructurallyChanged→ReloadPluginAsync 前先 ReplaceEntry 回旧值再 Reload）；回滚本身失败 → 聚合进同一 AggregateException 上抛
 3. 树卸载短路：`ThrowIfShuttingDown` 检查点进每步（卸载中的组更新不回滚——对齐 Disposal owns termination）
 4. TDD：组内 2 新增 1 失败 → 2 个均回滚（DumpConfig 复原 + 插件不在 _plugins）；双失败 → AggregateException 含 2 内因；回滚失败 → 聚合上抛
@@ -177,8 +184,8 @@ created: 2026-08-16
 | 编号 | 项 | 研判后优先级 | 工作量 | 建议处置 |
 |------|----|-----------|--------|---------|
 | CA-10 | 组 CRUD 级联（孤儿插件） | **P0（唯一正确性）** | M | **实施** |
-| CA-1 | isolate 接线 | P1 | M（最小档）/ L（完整档） | 实施——**需选档**（最小=值域隔离+门控全局限制注明；完整=registry 域感知） |
-| CA-3 | 组级事务 + 回滚 | P1 | M | 实施（08 §6.2 已设计） |
+| CA-1 | isolate 接线 | P1 | 取决于 schema 决策（A: +S / B: M~L） | **先定 schema**（A 对齐 Cordis map 两档 / B 保留列表简化）；再定档（最小=值域隔离+门控全局 / 完整=registry 域感知） |
+| CA-3 | 组级事务 + 回滚 | P1 | M | 实施（08 §6.2 已设计）；**并行改拓扑分层**（规避 DC-5 门控超时伪失败） |
 | CA-4 | 组合 update | P1 | S | 实施 |
 | CA-6 | initial 引导（激活死代码） | P1 | S | 实施 |
 | CA-12 | 服务级选项 + 日志首例 | P1 | M | 实施（DC-20 剩余收口） |
@@ -194,6 +201,18 @@ created: 2026-08-16
 
 > 实施顺序建议（若批准）：CA-10（P0）→ CA-1（先选档）/CA-3/CA-4/CA-6/CA-12（P1 批）→ CA-2/CA-5/CA-7/CA-9/CA-15（P2 批）。
 > 每批沿用 13 §6 纪律：TDD + 全量回归 + AOT 冒烟 + 14 日志 + 11 状态回写。
+
+## 5.1 复核注记（P53，对 P52 决策的二次批判）
+
+| 项 | 复核结论 | 更优方案 |
+|----|---------|---------|
+| CA-1 | P52 判"机制已有缺接线"**不完整**——漏了 schema 分叉（列表 vs Cordis map 两档域） | 先做 §2 第 0 步 schema 决策；未定 schema 前不实施接线 |
+| CA-3 | P52"组内全并行"**有缺陷**——门控超时（DC-5）会让依赖兄弟的新条目伪超时 | 拓扑分层并行 / 事务期豁免超时（§2 已改） |
+| CA-13 | RebindPolicy **基本冗余**：provider 重启已被 unload→re-register→依赖重载链（P25/P26）覆盖；且"owner 比对"复现不了 Cordis epoch（fiber-uid 变化即触发）语义 | 维持"场景驱动延后"；若做用变更事件（ServiceChanged）而非 owner 比对；只对蓝绿**存活替换**有意义 |
+| CA-12 | 首步次序可更优：默认 provider 缺失（走 NullLoggerFactory）比"缺 ServiceOptions"更基础 | 拆两阶段：①默认 RingBuffer+Console provider 开箱即用 + levels 选项；②再做通用 ServiceOptions 机制 |
+| CA-4 | 组合 update 命令式 API 可能 YAGNI——diff 路径（ApplyConfigAsync）已覆盖组合场景 | 可整体延后；仅编程式调用方需要时再补 |
+| CA-6/7 | initial/readonly 都假设文件后端，与 ADR-0013 配置源抽象有张力 | 写回管线显式圈定 LocalYaml provider 边界；或写回改走 IConfigProvider（大重构，另立专项） |
+| CA-9 | 修复方案正确（移除 Cts.Dispose + await runTask）；补充：DisposeAsync 是公共 API 与 effect 双路径，幂等靠 `_disposed`（已有） | 确认无需更多改动 |
 
 ## 6. 与相邻文档的关系
 

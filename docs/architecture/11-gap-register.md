@@ -100,8 +100,8 @@ created: 2026-08-15
 |---|------|------|------|------|
 | CA-9 | ~~计时器不随卸载回收~~（**初判误报**，P52 复核降级）→ 残留 CTS dispose 竞态 + 在途回调不收敛两个加固点 | ⚠️ 待决策（降级 P2 加固） | 18 §2 | effect 挂接已存在（ctx.Context.Effect + quiesce 收敛）；初版 grep 模式漏检 |
 | CA-10 | 组 CRUD 不级联（删组留孤儿运行插件/建组不加载子树） | ⚠️ 待决策（**唯一 P0 正确性**） | 18 §2 | DisposeHostedAsync 抽取 + 逆序逐叶 + EnumerateActiveLeaves 加载 |
-| CA-1 | isolate：运行时机制已有（独立 context 链），缺口 = EntryOptions.Isolate 配置接线 + 门控（registry）域感知 | ⚠️ 待决策（P1，**需选档**：最小=值域隔离 / 完整=registry 域感知） | 18 §2 | ContextFacade isolateNames 分支方案（v2 研判收窄） |
-| CA-3 | 组级事务（并行应用+聚合+逆序回滚） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | 08 §6.2 已设计未实现 |
+| CA-1 | isolate：**schema 分叉**（列表 vs Cordis Dict<name→true|label> 两档域）+ 配置接线 + 门控域感知 | ⚠️ 待决策（P1，先定 schema A对齐/B保留） | 18 §2/§5.1 | P53 复核修正：两档域模型（LocalRealm 私有/GlobalRealm 共享）此前漏判 |
+| CA-3 | 组级事务（并行应用+聚合+逆序回滚） | ⚠️ 待决策（建议 P1 实施） | 18 §2/§5.1 | 08 §6.2 已设计未实现；并行改拓扑分层（规避 DC-5 门控超时） |
 | CA-4 | EntryTree.update 组合语义（config+移动+position） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | 新 UpdateEntryAsync |
 | CA-6 | initial 引导（EnsureInitialAsync 死代码） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | InitialEntries 选项接线 |
 | CA-12 | 服务级配置合并链（intercept 对应物） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | DC-20 剩余收口；ServiceOptions + 日志首例 |
