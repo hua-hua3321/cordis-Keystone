@@ -94,13 +94,13 @@ created: 2026-08-15
 
 ### 3.3 代码级复查项（CA 系列，实现后第二轮，来源 18）
 
-> 2026-08-16 第二轮代码级审计（18-cordis-code-parity-audit）：不采信文档状态表、直接比对 vendored Cordis 源码与本仓 `src/` 逐项验证。A 类未实现 12 + B 类差异 6 ≈ 18%；**全部待人工决策**（18 §5 决策矩阵含实现提案）。
+> 2026-08-16 第二轮代码级审计（18-cordis-code-parity-audit）；同日 P52 **逐项二次研判**（完整读码替代抽样 grep）：CA-9 判定误报降级（effect 挂接已存在）、CA-1 缺口收窄（机制已有，缺配置接线+门控域）、CA-10 确认为唯一 P0 正确性。A 类 12 + B 类 6 ≈ 18%；**全部待人工决策**（18 §2/§3 含 v2 解决方案，§5 决策矩阵）。
 
 | # | 差距 | 状态 | 落点 | 备注 |
 |---|------|------|------|------|
-| CA-9 | 计时器不随插件卸载回收（僵尸副作用） | ⚠️ 待决策（建议 P0 实施） | 18 §2 | 唯一正确性 bug；Effect 注册一行级修复 |
-| CA-10 | 组 CRUD 不级联（删组留孤儿运行插件/建组不加载子树） | ⚠️ 待决策（建议 P0 实施） | 18 §2 | RemoveEntry/CreateEntry 逆序逐叶处理 |
-| CA-1 | isolate 服务隔离未接线（配置零消费） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | ServiceStore 键扩展 + ContextFacade.Isolate |
+| CA-9 | ~~计时器不随卸载回收~~（**初判误报**，P52 复核降级）→ 残留 CTS dispose 竞态 + 在途回调不收敛两个加固点 | ⚠️ 待决策（降级 P2 加固） | 18 §2 | effect 挂接已存在（ctx.Context.Effect + quiesce 收敛）；初版 grep 模式漏检 |
+| CA-10 | 组 CRUD 不级联（删组留孤儿运行插件/建组不加载子树） | ⚠️ 待决策（**唯一 P0 正确性**） | 18 §2 | DisposeHostedAsync 抽取 + 逆序逐叶 + EnumerateActiveLeaves 加载 |
+| CA-1 | isolate：运行时机制已有（独立 context 链），缺口 = EntryOptions.Isolate 配置接线 + 门控（registry）域感知 | ⚠️ 待决策（P1，**需选档**：最小=值域隔离 / 完整=registry 域感知） | 18 §2 | ContextFacade isolateNames 分支方案（v2 研判收窄） |
 | CA-3 | 组级事务（并行应用+聚合+逆序回滚） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | 08 §6.2 已设计未实现 |
 | CA-4 | EntryTree.update 组合语义（config+移动+position） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | 新 UpdateEntryAsync |
 | CA-6 | initial 引导（EnsureInitialAsync 死代码） | ⚠️ 待决策（建议 P1 实施） | 18 §2 | InitialEntries 选项接线 |
