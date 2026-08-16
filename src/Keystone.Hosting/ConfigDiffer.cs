@@ -17,7 +17,14 @@ public static class ConfigDiffer
         var oldById = Flatten(oldTree).ToDictionary(e => e.Entry.Id!, e => e, StringComparer.Ordinal);
         var newById = Flatten(newTree).ToDictionary(e => e.Entry.Id!, e => e, StringComparer.Ordinal);
 
-        var added = newById.Values.Where(e => !oldById.ContainsKey(e.Entry.Id!)).Select(e => e.Entry).ToList();
+        var added = newById.Values.Where(e => !oldById.ContainsKey(e.Entry.Id!))
+            .Select(e =>
+            {
+                // P0-1（19 号审计 LD-1）：携带新树归属——扁平集不含谱系，宿主侧会插到根
+                var (parent, position) = Locate(newTree, e.Entry.Id!);
+                return new AddedEntry(e.Entry, parent, position);
+            })
+            .ToList();
         var removed = oldById.Keys.Where(id => !newById.ContainsKey(id)).ToList();
 
         var configChanged = new List<EntryOptions>();
@@ -75,6 +82,31 @@ public static class ConfigDiffer
             .Select(kv => $"{kv.Key}={kv.Value}"));
 
     private sealed record EffectiveEntry(EntryOptions Entry, Dictionary<string, string> EffectiveIsolate);
+
+    /// <summary>P0-1：在树中定位条目归属（父组 id + 组内下标；根级 = (null, 根列表下标)）。</summary>
+    private static (string? Parent, int? Position) Locate(IReadOnlyList<EntryOptions> tree, string id)
+    {
+        for (var i = 0; i < tree.Count; i++)
+        {
+            if (string.Equals(tree[i].Id, id, StringComparison.Ordinal))
+            {
+                return (null, i);
+            }
+
+            if (tree[i].Group is { } children)
+            {
+                for (var j = 0; j < children.Count; j++)
+                {
+                    if (string.Equals(children[j].Id, id, StringComparison.Ordinal))
+                    {
+                        return (tree[i].Id, j);
+                    }
+                }
+            }
+        }
+
+        return (null, null); // 不可达（id 来自同树 Flatten）
+    }
 
     /// <summary>config 比对（引用相等短路；字典值逐键比——YAML 重读必是新实例）。</summary>
     private static bool ConfigEquals(object? oldConfig, object? newConfig)

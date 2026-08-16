@@ -50,7 +50,7 @@ public static class TimerExtensions
         private readonly TimeSpan? _debounceWindow;
         private readonly CancellationTokenSource _cts = new();
         private readonly Lock _lock = new();
-        private readonly Task _runTask = Task.CompletedTask; // RunLoop 任务引用（CA-9：quiesce 收敛在途回调用）
+        private Task _runTask = Task.CompletedTask; // fire 追踪链（P0-7：throttle/debounce 在途回调挂此链）
         private DateTimeOffset _nextAllowed;
         private Timer? _debounceTimer;
         private bool _disposed;
@@ -77,20 +77,11 @@ public static class TimerExtensions
                 _runTask = RunLoopAsync(_cts.Token);
             }
 
-            // 随插件卸载回收（quiesce → Effect 逆序收敛 → 取消 + 等在途回调，CA-9：
-            // 修复前只 Cancel 不等——quiesce 返回时最后一次回调可能仍在飞）
-            ctx.Context.Effect(async () =>
-            {
-                _cts.Cancel();
-                try
-                {
-                    await _runTask.ConfigureAwait(false);
-                }
-                catch (Exception)
-                {
-                    // RunLoop 异常已被其自身 catch（此处兜底防未观察——CA9 加固）
-                }
-            }, label: $"timer:{label}");
+            // 随插件卸载回收（quiesce → Effect 逆序收敛，CA-9 + P0-7）：
+            // DisposeAsync 三件事——①取消 + 等在途回调（含 throttle 在途，见 RunFireTracked）；
+            // ②弃置已武装的 debounce Timer（修复前：armed Timer 卸载后到点仍执行插件回调）；
+            // ③置 _disposed（修复前：quiesce 后 Trigger 仍可开火）
+            ctx.Context.Effect(() => DisposeAsync().AsTask(), label: $"timer:{label}");
         }
 
         public void Trigger()
@@ -111,7 +102,7 @@ public static class TimerExtensions
                     }
 
                     _nextAllowed = now + window;
-                    _ = FireSafeAsync();
+                    RunFireTracked(); // P0-7：在途回调挂 _runTask（quiesce 可等）
                     return;
                 }
 
@@ -127,7 +118,7 @@ public static class TimerExtensions
                                 _debounceTimer = null;
                             }
 
-                            _ = FireSafeAsync();
+                            RunFireTracked(); // P0-7：与 throttle 同等收敛
                         },
                         null,
                         Timeout.InfiniteTimeSpan,
@@ -137,8 +128,20 @@ public static class TimerExtensions
             }
         }
 
+        /// <summary>P0-7（19 号审计 CF-3）：fire 链入 _runTask 链——quiesce 的 DisposeAsync 等待在途回调。
+        /// 持锁：与 DisposeAsync 的读取互斥（防最后一发 fire 漏追踪）。</summary>
+        private void RunFireTracked()
+        {
+            lock (_lock)
+            {
+                var fire = FireSafeAsync(); // 异常由 FireSafeAsync 自吞（不会让 WhenAll 链 fault）
+                _runTask = Task.WhenAll(_runTask, fire);
+            }
+        }
+
         public async ValueTask DisposeAsync()
         {
+            Task run;
             lock (_lock)
             {
                 if (_disposed)
@@ -147,20 +150,21 @@ public static class TimerExtensions
                 }
 
                 _disposed = true;
-                _debounceTimer?.Dispose();
+                _debounceTimer?.Dispose(); // P0-7：弃置已武装的 debounce Timer（卸载后不再触发）
                 _debounceTimer = null;
                 _cts.Cancel();
+                run = _runTask; // 持锁读取（与 RunFireTracked 互斥）
             }
 
             // CA-9：不 Dispose CTS——与 RunLoop 的 Task.Delay(delay, ct) 竞态会漏 ObjectDisposedException
             // 出其 catch(OperationCanceledException)（未观察任务异常）；Cancel 已足够释放等待者，CTS 可终结
             try
             {
-                await _runTask.ConfigureAwait(false);
+                await run.ConfigureAwait(false);
             }
             catch (Exception)
             {
-                // 兜底：RunLoop 异常已自身 catch
+                // 兜底：RunLoop/fire 异常已自身 catch
             }
         }
 

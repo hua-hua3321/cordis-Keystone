@@ -569,25 +569,52 @@ public sealed class KeystoneHost : IAsyncDisposable
             }
         }
 
+        var runtimeTorn = false; // D-4：reload 是否已"先卸旧"（DC-6）——失败时运行体已失需复原
         try
         {
-            await ApplyEntryUpdateAsync(id, updated, structuralChanged || parentChanged).ConfigureAwait(false);
+            await ApplyEntryUpdateAsync(id, updated, structuralChanged || parentChanged, torn => runtimeTorn = torn)
+                .ConfigureAwait(false);
             ScheduleWriteBack();
         }
         catch (Exception)
         {
             RestoreEntry(id, current, moved, sourceParent, sourceIndex);
+            if (runtimeTorn)
+            {
+                await RestoreRuntimeAsync(id).ConfigureAwait(false);
+            }
+
             throw;
         }
     }
 
-    /// <summary>热/冷路径执行（CA-4）：结构变或跨组 → 冷重启；否则 PatchContext 瀑布热更新。</summary>
-    private async Task ApplyEntryUpdateAsync(string id, Keystone.Config.Entries.EntryOptions updated, bool coldPath)
+    /// <summary>D-4（19 号审计 LD-9，对齐 entry.ts:232-243）：失败用旧条目重启插件
+    /// （修复前只复原树不复原运行时 → 失败后插件处于已卸载态）。树已复原，尽力而为——
+    /// 复原失败不上抛（原异常为准，树态是唯一承诺）。</summary>
+    private async Task RestoreRuntimeAsync(string id)
+    {
+        // CA1031：兜底复原尽力而为——插件可抛任意异常，吞掉以保原异常上抛
+#pragma warning disable CA1031
+        try
+        {
+            await ReloadPluginAsync(id).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>热/冷路径执行（CA-4）：结构变或跨组 → 冷重启；否则 PatchContext 瀑布热更新。
+    /// torn 回调：即将"先卸旧"（DC-6）时置真——调用方失败路径据此复原运行时（D-4）。</summary>
+    private async Task ApplyEntryUpdateAsync(
+        string id, Keystone.Config.Entries.EntryOptions updated, bool coldPath, Action<bool> torn)
     {
         if (coldPath)
         {
             ReplaceEntry(_tree, updated);
             PluginReloading?.Invoke(this, new PluginReloadingEventArgs(id));
+            torn(true);
             await ReloadPluginAsync(id).ConfigureAwait(false);
             return;
         }
@@ -595,6 +622,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         await PatchContextAsync(updated, async () =>
         {
             ReplaceEntry(_tree, updated);
+            torn(true);
             await ReloadPluginAsync(id).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
@@ -700,11 +728,7 @@ public sealed class KeystoneHost : IAsyncDisposable
                 .Where(e => e is not null)
                 .ToDictionary(e => e!.Id!, e => e!, StringComparer.Ordinal); // 变更前旧条目（回滚素材）
 
-            await CollectPerItemAsync(diff.Removed, failures, async id =>
-            {
-                ThrowIfShuttingDown();
-                await RemoveEntryAsync(id).ConfigureAwait(false); // 删除不回滚重建（旧树在调用方）
-            }).ConfigureAwait(false);
+            await ApplyRemovedStageAsync(diff.Removed, failures, applied).ConfigureAwait(false);
 
             await CollectPerItemAsync(diff.Added, failures, entry => ApplyAddedEntryAsync(entry, applied)).ConfigureAwait(false);
 
@@ -714,18 +738,9 @@ public sealed class KeystoneHost : IAsyncDisposable
             await CollectStepAsync(failures, async () =>
             {
                 ThrowIfShuttingDown();
-                await ApplyStructuralChangesAsync(diff.StructurallyChanged).ConfigureAwait(false);
-                foreach (var entry in diff.StructurallyChanged)
-                {
-                    if (oldEntries.GetValueOrDefault(entry.Id!) is { } oldEntry)
-                    {
-                        applied.Add(async () =>
-                        {
-                            ReplaceEntry(_tree, oldEntry);
-                            await ReloadPluginAsync(oldEntry.Id!).ConfigureAwait(false);
-                        });
-                    }
-                }
+                // P0-3（19 号审计 LD-3）：逐条目登记 undo（树替换即记）——中途失败也复原已替换树，
+                // 不留半应用态（对齐 Cordis 失败全量重建）
+                await ApplyStructuralChangesAsync(diff.StructurallyChanged, oldEntries, applied).ConfigureAwait(false);
             }).ConfigureAwait(false);
 
             await CollectPerItemAsync(diff.ConfigChanged, failures,
@@ -750,12 +765,69 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
     }
 
-    /// <summary>新增条目应用（CA-3）：成功记回滚（RemoveEntryAsync）。</summary>
-    private async Task ApplyAddedEntryAsync(EntryOptions entry, List<Func<Task>> applied)
+    /// <summary>Removed 阶段（D-5，对齐 Cordis group.ts:95-101 回滚面=全量重建含 Removed）：
+    /// 删除前捕获原条目+归属；删除后登记复合 undo（组先于子按声明序整体重建并重载）。</summary>
+    private async Task ApplyRemovedStageAsync(
+        IReadOnlyList<string> removed, List<Exception> failures, List<Func<Task>> applied)
+    {
+        var removedUndo = removed
+            .Select(id => (Id: id, Entry: FindEntry(_tree, id), Loc: LocateEntry(_tree, id)))
+            .Where(u => u.Entry is not null)
+            .ToList();
+
+        await CollectPerItemAsync(removed, failures, async id =>
+        {
+            ThrowIfShuttingDown();
+            await RemoveEntryAsync(id).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+
+        if (removedUndo.Count == 0)
+        {
+            return;
+        }
+
+        var undo = removedUndo; // 闭包捕获
+        applied.Add(async () =>
+        {
+            foreach (var (rid, rentry, (rparent, rindex)) in undo)
+            {
+                if (FindEntry(_tree, rid) is not null)
+                {
+                    continue; // 已随组重建连带恢复
+                }
+
+                InsertEntry(_tree, rentry!, rparent, rindex);
+                foreach (var leaf in EnumerateActiveLeaves([rentry!]))
+                {
+                    await LoadEntryAsync(leaf).ConfigureAwait(false); // 失活态不重载（原状态保持）
+                }
+            }
+        });
+    }
+
+    /// <summary>新增条目应用（CA-3 + P0-1/P0-2）：
+    /// P0-1——按 diff 携带的谱系进父组（修复前：扁平集无 parent → 子叶被插到根）；
+    /// P0-2——跳过已随父组 Create 连带加载的子条目（修复前：再 Create 撞 duplicate id → 新组+子必失败）；
+    /// 失败清树——CreateEntryAsync 先插树后加载，编译失败须撤树（不留半应用条目）。</summary>
+    private async Task ApplyAddedEntryAsync(AddedEntry added, List<Func<Task>> applied)
     {
         ThrowIfShuttingDown();
-        await CreateEntryAsync(entry).ConfigureAwait(false);
-        var addedId = entry.Id!;
+        if (FindEntry(_tree, added.Entry.Id!) is not null)
+        {
+            return; // P0-2：Added 扁平集含组+全部子——组已连带加载，去重
+        }
+
+        var addedId = added.Entry.Id!;
+        try
+        {
+            await CreateEntryAsync(added.Entry, added.ParentId, added.Position).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            await RemoveEntryAsync(addedId).ConfigureAwait(false); // 撤树（未托管插件 = 纯树移除）
+            throw;
+        }
+
         applied.Add(() => RemoveEntryAsync(addedId));
     }
 
@@ -846,17 +918,36 @@ public sealed class KeystoneHost : IAsyncDisposable
 
     /// <summary>结构变应用（两阶段，P57-T5）：先整体替换树——组级 isolate 声明先落位，
     /// 叶子重载时 BuildIsolateMap 读到的已是新谱系；再逐叶子冷重启（组条目本身无运行时）。</summary>
-    private async Task ApplyStructuralChangesAsync(IReadOnlyList<Keystone.Config.Entries.EntryOptions> changed)
+    /// <summary>结构变更应用（CA-3 + P0-3）：逐条目"替换树 → 即刻登记 undo → 重载"——
+    /// 重载失败时树也已登记复原（修复前：undo 整步后统一登记 → 中途失败留半应用态）。</summary>
+    private async Task ApplyStructuralChangesAsync(
+        IReadOnlyList<Keystone.Config.Entries.EntryOptions> changed,
+        IReadOnlyDictionary<string, Keystone.Config.Entries.EntryOptions> oldEntries,
+        List<Func<Task>> applied)
     {
         foreach (var entry in changed)
         {
+            ThrowIfShuttingDown();
+            var oldEntry = oldEntries.GetValueOrDefault(entry.Id!);
             ReplaceEntry(_tree, entry);
-        }
+            if (oldEntry is { } prev)
+            {
+                var undoId = entry.Id!;
+                applied.Add(async () =>
+                {
+                    ReplaceEntry(_tree, prev);
+                    if (!prev.IsGroup)
+                    {
+                        await ReloadPluginAsync(undoId).ConfigureAwait(false);
+                    }
+                });
+            }
 
-        foreach (var entry in changed.Where(e => !e.IsGroup))
-        {
-            PluginReloading?.Invoke(this, new PluginReloadingEventArgs(entry.Id!));
-            await ReloadPluginAsync(entry.Id!).ConfigureAwait(false);
+            if (!entry.IsGroup)
+            {
+                PluginReloading?.Invoke(this, new PluginReloadingEventArgs(entry.Id!));
+                await ReloadPluginAsync(entry.Id!).ConfigureAwait(false);
+            }
         }
     }
 

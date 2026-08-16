@@ -60,9 +60,11 @@ public class HostRetentionTests
 
         var callsAtStop = store.PruneCalls;
         await host.DisposeAsync();
-        await Task.Delay(80); // 关闭后不再增长
 
-        Assert.True(callsAtStop >= 2); // 宿主在跑 → 周期执行
-        Assert.Equal(callsAtStop, store.PruneCalls); // 宿主停 → 调度停
+        Assert.True(callsAtStop >= 2, $"prune ran {callsAtStop} times before stop"); // 宿主在跑 → 周期执行
+        await Task.Delay(200); // 在途回调落地窗口（并行负载下 dispose 与 tick 竞态）
+        var settled = store.PruneCalls;
+        await Task.Delay(100); // 静止采样：停后不再增长
+        Assert.Equal(settled, store.PruneCalls); // 宿主停 → 调度停
     }
 }

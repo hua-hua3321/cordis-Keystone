@@ -1027,6 +1027,19 @@ created: 2026-08-15
 | T3 汇总落档 | 19 号文档（P0 七项/P1 七项/D 九项/P2 卅一项/verified 凭证/决策矩阵）+ 11 §3.4 登记 + AGENTS 索引 | docs/architecture/19-second-parity-verification-audit.md | ✔ 2026-08-16 |
 | T4 总裁定落档 | 人工裁定：全部语义分歧**按 Cordis 方式**（D-1 真热更新实施/D-6 Provide 报错式+Set/D-8 事件广播/P2-13 PENDING+FAILED re-arm/EntryGroup 删除等）——19 §8 裁定表 + §9 修订批次 P64-P69 | 文档 | frontmatter 过 | ✔ 2026-08-16 |
 
+#### W64-01 P64：事务与生命周期正确性批（19 §1/§3：P0-1/2/3 + P0-6 + P0-7 + D-4 + D-5 + D-9）
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| T1 事务三连（P0-1/2/3） | diff Added 携带谱系（AddedEntry(Entry, ParentId, Position) + ConfigDiffer.Locate）→ 子叶进组；Added 去重（父组 Create 已连带加载的子跳过——新组+子不再 duplicate 必败）；结构步逐条目"替换树→即刻登记 undo→重载"（中途失败也复原已替换树）；Added 失败清树（CreateEntryAsync 先插树后加载，编译失败撤树） | ConfigDiff.cs/ConfigDiffer.cs/KeystoneHost.cs（AddedEntry.cs 新建） | TransactionGroupingTests 5 例（红→绿）；GroupTransactionTests 原用例暴露 bad 进组的半应用残留 → 失败清树修复 | ✔ |
+| T2 Removed 回滚（D-5） | ApplyRemovedStageAsync：删除前捕获（原条目, 父 id, 下标），删除后登记复合 undo——组先于子按声明序整体重建+重载，已随组恢复的子跳过（对齐 group.ts:95-101 全量重建；P59 注记作废） | KeystoneHost.cs | Removed_entries_are_restored_on_failure | ✔ |
+| T3 失败复原运行时（D-4） | UpdateEntryAsync torn 标记（即将"先卸旧"时置位）→ catch 先 RestoreEntry 再 RestoreRuntimeAsync（旧条目重启，尽力而为吞复原异常——对齐 entry.ts:232-243） | KeystoneHost.cs | UpdateEntry_failure_restores_plugin_runtime | ✔ |
+| T4 订阅回收（P0-6） | ContextFacade 五个 Subscribe* 经 TrackSubscription 挂 effect（"event-subscription"）——quiesce 自动退订，handler 不再钉死 ALC（对齐 events.ts:254-259 监听器即 fiber effect）；CA2000 注记（句柄刻意丢弃——Dispose 语义已变为执行 disposer） | ContextFacade.cs | SubscriptionLifecycleTests 4 例 | ✔ |
+| T5 计时器收口（P0-7） | TimerHandle：effect disposer 改为 DisposeAsync()（三合一：取消+等在途、弃置已武装 debounce Timer、置 _disposed）；throttle/debounce fire 经 RunFireTracked 挂 _runTask WhenAll 链（持锁与 DisposeAsync 读取互斥）——quiesce 等在途回调、卸载后不再触发 | TimerExtensions.cs | TimerQuiesceHardeningTests 3 例 | ✔ |
+| T6 Effect 句柄 Dispose=执行（D-9） | EffectNode.Disposed→Interlocked TryMarkDisposed（与 DisposeAllAsync 并发恰一次）；Registration.Dispose 执行 disposer（GetAwaiter().GetResult()）——`using var h = ctx.Effect(cleanup)` 惯例成立（对齐 fiber.ts:427-442） | EffectRegistry.cs | SubscriptionLifecycleTests 3 例（执行/幂等/与 DisposeAll 恰一次） | ✔ |
+| T7 回归 | 全量 6 套件 | 新增 12 测试 | 425/425（4 轮 + 5 轮复跑全绿）；Hosting AOT 零 IL 警告 | ✔ |
+| T8 测试加固 | PluginFileWatchTests 收尾改轮询 + 容忍 reload 瞬态窗口（旧已卸新未挂）；HostRetentionTests 停后静止双采样（在途回调落地窗口） | 两测试文件 | 5 轮全量无抖动 | ✔ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |

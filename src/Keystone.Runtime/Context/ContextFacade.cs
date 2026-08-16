@@ -152,20 +152,39 @@ public sealed class ContextFacade : IPluginContext, IContext
 
     // ── IPluginContext：事件订阅面（转发 Events；监听者 scope 缺省 = 本 context，G15）──
 
+    // P0-6（19 号审计 CF-1/EV-5，对齐 Cordis events.ts:254-259——监听器即 fiber effect）：
+    // 订阅同时挂 effect——context quiesce（DisposeEffectsAsync）自动退订，handler 不滞留
+    // 共享总线（否则插件卸载后 ALC 被钉死）。手动 Dispose 退订与 quiesce 退订幂等共存。
+
     public IDisposable Subscribe<TEvent>(Action<TEvent> handler, EventSubscriptionOptions? options = null)
-        => _events.Subscribe(handler, Normalize(options));
+        => TrackSubscription(_events.Subscribe(handler, Normalize(options)));
 
     public IDisposable SubscribeParallel<TEvent>(Func<TEvent, Task> handler, EventSubscriptionOptions? options = null)
-        => _events.SubscribeParallel(handler, Normalize(options));
+        => TrackSubscription(_events.SubscribeParallel(handler, Normalize(options)));
 
     public IDisposable SubscribeSerial<TEvent>(Func<TEvent, Task<object?>> handler, EventSubscriptionOptions? options = null)
-        => _events.SubscribeSerial(handler, Normalize(options));
+        => TrackSubscription(_events.SubscribeSerial(handler, Normalize(options)));
 
     public IDisposable SubscribeBail<TEvent>(Func<TEvent, object?> handler, EventSubscriptionOptions? options = null)
-        => _events.SubscribeBail(handler, Normalize(options));
+        => TrackSubscription(_events.SubscribeBail(handler, Normalize(options)));
 
     public IDisposable SubscribeWaterfall<TEvent>(WaterfallHandler<TEvent> handler, EventSubscriptionOptions? options = null)
-        => _events.SubscribeWaterfall(handler, Normalize(options));
+        => TrackSubscription(_events.SubscribeWaterfall(handler, Normalize(options)));
+
+    /// <summary>订阅挂 effect（quiesce 自动退订）；返回句柄手动 Dispose = 立即退订（幂等）。</summary>
+    private IDisposable TrackSubscription(IDisposable subscription)
+    {
+        // CA2000：句柄刻意丢弃——不手动 Dispose（其语义是"执行 disposer"= 立即退订），
+        // 退订由 quiesce（DisposeAllAsync）或订阅句柄手动 Dispose 触发，二者幂等
+#pragma warning disable CA2000
+        _ = _effects.Register(() =>
+#pragma warning restore CA2000
+        {
+            subscription.Dispose();
+            return Task.CompletedTask;
+        }, label: "event-subscription");
+        return subscription;
+    }
 
     private EventSubscriptionOptions Normalize(EventSubscriptionOptions? options)
         => options is null

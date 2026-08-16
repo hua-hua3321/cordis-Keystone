@@ -103,9 +103,30 @@ public class PluginFileWatchTests : IDisposable
             Assert.Fail("plugin watcher did not trigger reload within 30s");
         }
 
-        // 冷重启凭证：重载后 GetPluginState 仍 Active（新 ALC 实例接管；编译失败会 FAILED）
-        await Task.Delay(200); // 等 reload 收尾
-        Assert.Equal(PluginLifecycleState.Active, host.GetPluginState("pw")); // 热替换成功非失败
+        // 冷重启凭证：重载后 GetPluginState 仍 Active（新 ALC 实例接管；编译失败会 FAILED）。
+        // 轮询等待 reload 收尾（固定 200ms 在全量并行负载下不稳——防抖+编译耗时随机器负载波动）
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            try
+            {
+                if (host.GetPluginState("pw") == PluginLifecycleState.Active)
+                {
+                    break; // 新 ALC 实例接管完成
+                }
+            }
+            catch (Keystone.Core.Errors.KeystoneException)
+            {
+                // reload 瞬态窗口：旧实例已卸、新实例未挂（DC-6 先卸后建）
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                Assert.Fail("plugin not Active within 10s after reload");
+            }
+
+            await Task.Delay(50);
+        }
 
         await host.ShutdownAsync();
     }

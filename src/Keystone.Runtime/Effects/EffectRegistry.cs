@@ -66,12 +66,10 @@ public sealed class EffectRegistry : IEffectRegistry
 
     private static async Task RunDisposerAsync(EffectNode node)
     {
-        if (node.Cancelled || node.Disposed)
+        if (!node.TryMarkDisposed()) // Interlocked：手动 Dispose 与 DisposeAll 并发时恰执行一次
         {
             return;
         }
-
-        node.Disposed = true;
         var previous = Current.Value;
         Current.Value = node; // 回调内注册 → 挂本节点子列表
         try
@@ -97,6 +95,8 @@ public sealed class EffectRegistry : IEffectRegistry
 
     private sealed class EffectNode
     {
+        private int _disposed;
+
         public EffectNode(Func<Task> disposer, string? label, string? callerMember)
         {
             Disposer = disposer;
@@ -112,9 +112,10 @@ public sealed class EffectRegistry : IEffectRegistry
 
         public List<EffectNode> Children { get; } = [];
 
-        public bool Disposed { get; set; }
+        public bool Disposed => Volatile.Read(ref _disposed) != 0;
 
-        public bool Cancelled { get; set; }
+        /// <summary>CAS 置位：true = 本次调用赢得执行权（幂等保障）。</summary>
+        public bool TryMarkDisposed() => Interlocked.Exchange(ref _disposed, 1) == 0;
     }
 
     private sealed class Registration : IDisposable
@@ -127,6 +128,11 @@ public sealed class EffectRegistry : IEffectRegistry
             _node = node;
         }
 
+        /// <summary>
+        /// D-9（19 号审计 CF-7，对齐 Cordis fiber.ts:427-442）：句柄 Dispose = **执行** disposer 一次
+        /// （`using var h = ctx.Effect(cleanup)` 的 C# 惯例），而非仅取消。幂等——
+        /// 与 DisposeAllAsync 竞争时 Interlocked 保证恰执行一次。
+        /// </summary>
         public void Dispose()
         {
             if (_disposed)
@@ -135,7 +141,7 @@ public sealed class EffectRegistry : IEffectRegistry
             }
 
             _disposed = true;
-            _node.Cancelled = true; // 手动退订 = 取消执行（DisposeAll 跳过）
+            RunDisposerAsync(_node).GetAwaiter().GetResult();
             GC.SuppressFinalize(this);
         }
     }
