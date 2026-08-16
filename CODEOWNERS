@@ -1,0 +1,21 @@
+# CODEOWNERS
+#
+# 当有人修改匹配的文件并提交 PR 时，以下所有者会被请求参与 Review。
+# 请将下面的 handle 替换为你的项目实际 GitHub 团队 / 维护者。
+# (These owners are requested for review when someone opens a pull request that
+# modifies the matching files. Update the handles below to match your project's
+# GitHub team / maintainers.)
+#
+# 语法：<pattern>    <@owner1> <@owner2>
+# Syntax: <pattern>    <@owner1> <@owner2>
+# 参考 See https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# 仓库内所有文件的默认所有者（Default owners for everything in the repo）。
+*       @tovis
+
+# 架构与决策文档需维护者 Review（Architecture and design decisions require maintainer review）。
+/docs/architecture/    @tovis
+/docs/decisions/       @tovis
+
+# CI 工作流（CI workflows）。
+/.github/    @tovis

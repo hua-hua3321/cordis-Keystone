@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Q&A / Discussions
+    url: https://github.com/<your-org>/cordis-csharp/discussions
+    about: Ask "how do I…" questions and discuss design here.
+  - name: 🔒 Security vulnerability
+    url: https://github.com/<your-org>/cordis-csharp/security/advisories/new
+    about: Please report security issues privately — do NOT open a public issue.

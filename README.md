@@ -3,9 +3,33 @@
 > 基于 .NET 的**通用地基插件框架**：任何 C# 应用可嵌入（配置驱动、多实例隔离、热重载、中间件管道式执行模型）。
 > **命名与定位声明**：Keystone 是独立命名的地基框架，插件理念受 DeepSeek Harness vendored Cordis 启发（作为参照基线），**非 Cordis 官方再实现、不占用 Cordis 名义**；Cordis 一词在本仓库仅作参照上游引用。
 
+[![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dot.net/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/your-org/cordis-csharp/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/cordis-csharp/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-architecture-blue)](docs/architecture/)
+
+**Keystone** is a universal, configuration-driven plugin framework for .NET — a
+plugin substrate any C# application can embed, with multi-instance isolation,
+hot reload, and a middleware-pipeline execution model.
+
+## 📚 文档 / Documentation
+
+| 资源 | 链接 |
+|------|------|
+| 快速上手（中文） | [docs/tutorials/getting-started.md](docs/tutorials/getting-started.md) |
+| Getting Started (English) | [docs/tutorials/getting-started.en.md](docs/tutorials/getting-started.en.md) |
+| 架构文档（20 篇） | [docs/architecture/](docs/architecture/) |
+| 设计决策 ADR-0001~0018 | [docs/decisions/](docs/decisions/) |
+| 英文 README | [README.en.md](README.en.md) |
+| 贡献指南（中 / 英） | [CONTRIBUTING.md](CONTRIBUTING.md) · [CONTRIBUTING.en.md](CONTRIBUTING.en.md) |
+| 行为准则（中 / 英） | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · [CODE_OF_CONDUCT.en.md](CODE_OF_CONDUCT.en.md) |
+| 安全政策（中 / 英） | [SECURITY.md](SECURITY.md) · [SECURITY.en.md](SECURITY.en.md) |
+| 支持与问答（中 / 英） | [SUPPORT.md](SUPPORT.md) · [SUPPORT.en.md](SUPPORT.en.md) |
+| 更新日志（中 / 英） | [CHANGELOG.md](CHANGELOG.md) · [CHANGELOG.en.md](CHANGELOG.en.md) |
+
 ## 当前状态
 
-**实现期完成（M0-M13 全部通过，187 测试全绿）**：Keystone 框架 1.0 可运行——核心（契约/上下文/事件/生命周期/管道/加载/配置/管理层/能力域/观测/持久化/SDK/AI 组合）十三阶段全部落地，全工程 AOT 零 IL 警告（Proto.Actor/MAF 例外按 ADR-0015 记录）。本仓库是方案与实现进度的唯一真源（Single Source of Truth）。
+**实现期完成（M0-M13 全部通过，500 测试全绿）**：Keystone 框架 1.0 可运行——核心（契约/上下文/事件/生命周期/管道/加载/配置/管理层/能力域/观测/持久化/SDK/AI 组合）十三阶段全部落地，全工程 AOT 零 IL 警告（Proto.Actor/MAF 例外按 ADR-0015 记录）。本仓库是方案与实现进度的唯一真源（Single Source of Truth）。
 
 ## 项目定位
 
@@ -27,8 +51,8 @@
 
 ## 文档索引
 
-- 架构：`docs/architecture/`（00 技术栈 ~ 14 实施记录，见 [AGENTS.md](AGENTS.md) 索引）
-- 决策：`docs/decisions/README.md`（ADR-0001 ~ 0013，设计期已收敛；实现期新决策走 14 §4 通道）
+- 架构：`docs/architecture/`（00 技术栈 ~ 19 第二轮等价性复核，见 [AGENTS.md](AGENTS.md) 索引）
+- 决策：`docs/decisions/README.md`（ADR-0001 ~ 0018，设计期已收敛；实现期新决策走 14 §4 通道）
 - 差距分析：[07-cordis-migration-gap.md](docs/architecture/07-cordis-migration-gap.md)（对照 vendored Cordis 源码的 7 必查项 + 差距清单）
 - 实施推进：[13-implementation-plan.md](docs/architecture/13-implementation-plan.md)（分阶段计划 + 里程碑）+ [14-implementation-log.md](docs/architecture/14-implementation-log.md)（过程记录 + 回溯索引）
 
@@ -36,7 +60,7 @@
 
 ```bash
 dotnet build cordis-csharp.slnx          # 警告即错误（TreatWarningsAsErrors + 分析器）
-dotnet test cordis-csharp.slnx           # 187 个单测（M0-M13 全阶段）
+dotnet test cordis-csharp.slnx           # 500 个单测（M0-M13 全阶段 + P14-P72 审计批）
 ```
 
 规则 0 AOT 冒烟（每阶段验收，13 §4）：
@@ -62,3 +86,15 @@ cd ~/Projects/central-governance && python3 scripts/validate_frontmatter.py
 
 - cognitive-tree-csharp（同构看板，slug cognitivetree-c / cognitive-tree-csharp）
 - DeepSeek Harness（vendored Cordis 源码基线：`~/Projects/deepseek-harness/vendor/cordis/src/`——仅作理念参照）
+
+---
+
+## 🤝 社区与贡献 / Community
+
+欢迎参与！请先阅读[贡献指南](CONTRIBUTING.md)与[行为准则](CODE_OF_CONDUCT.md)。
+提交 Bug 或功能建议请使用 GitHub Issue 模板；安全问题请见[安全政策](SECURITY.md)
+**不要**公开提 issue。获取帮助见[支持文档](SUPPORT.md)。
+
+## 📄 许可证 / License
+
+本项目以 [MIT 许可证](LICENSE) 开源。© 2026 Keystone contributors.

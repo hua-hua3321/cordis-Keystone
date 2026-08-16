@@ -1,8 +1,60 @@
+# ───── Project-specific (Keystone) ─────
 .worktrees/
-bin/
-obj/
 .tools/
 .nuget/
 *.user
+
+# ───── Visual Studio / VS Code / Rider ─────
 .vs/
 .idea/
+*.swp
+*.swo
+*~
+.vscode/launch.json
+.vscode/tasks.json
+*.DotSettings
+*.DotSettings.user
+
+# ───── Build results ─────
+[Bb]in/
+[Oo]bj/
+artifacts/
+
+# ───── NuGet ─────
+*.nupkg
+.nuget/
+packages/
+project.lock.json
+project.assets.json
+
+# ───── RIDs / publish output ─────
+*.app/
+publish/
+
+# ───── Test / coverage ─────
+[Tt]est[Rr]esult*/
+[Cc]overage*/
+*.coverage
+*.coveragexml
+*.trx
+coverage.cobertura.xml
+
+# ───── Roslyn / analyzer caches ─────
+*.csproj.user
+*.sln.docstates
+.vs/config/applicationhost.config
+
+# ───── Source generators / temp ─────
+*.generated.cs
+Generated/
+
+# ───── OS files ─────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ───── Local secrets / env ─────
+*.local
+secrets.json
+.env
+.env.*

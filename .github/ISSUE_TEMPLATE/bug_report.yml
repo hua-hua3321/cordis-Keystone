@@ -1,0 +1,64 @@
+name: 🐛 Bug report
+description: Report a reproducible defect in Keystone
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please fill this out as completely as you can.
+        For questions and "how do I…" topics, use Discussions instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+      placeholder: When I load plugin X and trigger hot reload, the host throws …
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Configure entry … in config.yaml
+        2. Start host with … 
+        3. Call … 
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        - Keystone version / commit:
+        - .NET runtime / SDK version:
+        - OS + arch (e.g. macOS arm64, Linux x64, Windows x64):
+        - Plugin form (file-based / precompiled DLL):
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / stack trace
+      description: Paste any error output. Use ``` to format. Avoid secrets / tokens.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I did not include any secrets, tokens, or private data.
+          required: true

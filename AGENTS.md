@@ -59,6 +59,8 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 | [architecture/18-cordis-code-parity-audit.md](architecture/18-cordis-code-parity-audit.md) | 实现后代码级对照审计：CA-1~18 差距 + 实现提案（已全部收敛：11 实施 + ADR-0016 弃用 + 接受差异注记） | 标准 |
 | [architecture/19-second-parity-verification-audit.md](architecture/19-second-parity-verification-audit.md) | 第二轮实现后等价性复核：P0-P2/D 系列发现（108 项，P57-P63 实施后全量再对照） | 标准 |
 | [decisions/](decisions/README.md) | 决策记录（ADR-0001 ~ 0018，设计期已收敛；实现期新决策走 14 §4 通道 + ADR-0017/0018） | accepted |
+| [docs/tutorials/](docs/tutorials/) | 开源中英文教程（快速上手：嵌入宿主/编写插件/中间件/事件/配置/热重载） | 标准 |
+| 开源治理（README(.md/.en.md) / LICENSE / CONTRIBUTING(.md/.en.md) / CODE_OF_CONDUCT(.md/.en.md) / SECURITY(.md/.en.md) / CHANGELOG(.md/.en.md) / SUPPORT(.md/.en.md) / CODEOWNERS） | 社区与贡献约定、行为准则、安全披露、更新日志（中英文双语） | 标准 |
 
 ## 治理
 

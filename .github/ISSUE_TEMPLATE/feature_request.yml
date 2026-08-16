@@ -1,0 +1,41 @@
+name: 💡 Feature request
+description: Propose a new feature or design improvement for Keystone
+title: "[feat]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! For larger design changes, consider opening a
+        Discussion first so we can align before you write an ADR / code.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem would this feature solve? What's the motivating use case?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the feature and how it should work.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative approaches or workarounds you thought about.
+  - type: textarea
+    id: adr
+    attributes:
+      label: Related ADR / architecture doc
+      description: If this touches architecture, note the relevant ADR or doc (docs/decisions, docs/architecture).
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues/ADRs and this is not a duplicate.
+          required: true
