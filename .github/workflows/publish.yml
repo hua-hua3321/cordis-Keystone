@@ -1,0 +1,130 @@
+name: Publish to NuGet
+
+# 触发方式：
+# 1. 推送 v* tag（如 v1.0.0）→ 自动测试 + 打包 + 发布到 nuget.org（推荐，发版显式可控）
+# 2. 手动触发（Actions 页 → Run workflow）→ 用仓库默认版本（1.0.0）发布
+#
+# 前置条件：仓库 Settings → Secrets and variables → Actions 添加 NUGET_APIKEY
+#   （nuget.org → API Keys 生成的 key，须有 Push new packages 权限）
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore cordis-csharp.slnx
+
+      - name: Build (warnings as errors)
+        run: dotnet build cordis-csharp.slnx --no-restore -c Release -warnaserror
+
+      - name: Test
+        run: dotnet test cordis-csharp.slnx --no-build --no-restore -c Release
+
+      # tag 驱动版本：v1.0.0 → 1.0.0；手动触发时用仓库默认版本
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+            if ! [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::tag 格式非法（须为 v0.x.y）: $GITHUB_REF_NAME"
+              exit 1
+            fi
+            echo "version=$VER" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=1.0.0" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 六个库包按依赖拓扑一次打出：Core → Config/Runtime → Hosting/Sdk/AI
+      - name: Pack
+        run: dotnet pack cordis-csharp.slnx --no-build -c Release -o artifacts/nupkg -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Push to NuGet
+        run: dotnet nuget push "artifacts/nupkg/*.nupkg" --api-key ${{ secrets.NUGET_APIKEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+name: publish
+
+# 触发：推送 v* tag（如 v1.0.0）→ 测试 → 打包 → 发布 6 个包到 nuget.org
+# 前置条件：仓库 Settings → Secrets and variables → Actions 添加 NUGET_APIKEY
+#   （nuget.org → API Keys → Create，Scopes 勾选 Push；key 前缀 skull-）
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: nuget-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Require NUGET_APIKEY secret
+        env:
+          NUGET_APIKEY: ${{ secrets.NUGET_APIKEY }}
+        run: |
+          if [ -z "$NUGET_APIKEY" ]; then
+            echo "::error::缺少 secret NUGET_APIKEY（Settings → Secrets and variables → Actions）"
+            exit 1
+          fi
+
+      # tag 驱动版本：v1.0.0 → 1.0.0，六包统一同版
+      - name: Extract version from tag
+        id: version
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          if ! [[ "$VER" =~ ^[0-9]+.[0-9]+.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag 格式非法（须为 v0.x.y）: $GITHUB_REF_NAME"
+            exit 1
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: dotnet test cordis-csharp.slnx --configuration Release
+
+      - name: Pack
+        run: >
+          dotnet pack cordis-csharp.slnx --configuration Release
+          --no-build -p:Version=${{ steps.version.outputs.version }}
+          --output artifacts/packages
+
+      - name: Push to nuget.org
+        env:
+          NUGET_APIKEY: ${{ secrets.NUGET_APIKEY }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(artifacts/packages/*.nupkg)
+          echo "待发布 ${#pkgs[@]} 个包："
+          ls -1 artifacts/packages/
+          dotnet nuget push artifacts/packages/*.nupkg \
+            --api-key "$NUGET_APIKEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
