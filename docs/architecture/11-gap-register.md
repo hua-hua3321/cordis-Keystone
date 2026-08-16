@@ -117,7 +117,7 @@ created: 2026-08-15
 
 ## 4. 当前开放项
 
-**CAV 系列（§3.4，19 号第二轮复核）已全部收敛（P64-P69 六批）**；**P70 观测性专项（ADR-0018）已落地**（OTel 三层：apply/entry/group-tx/hotupdate span + actor 边界日志/指标 + hotupdate.operations/writer.failures 计数，483 测试全绿）。CA 系列（§3.3，18 项）已全部收敛（P57-P63）：11 项已实施、CA-8 弃用（ADR-0016）、CA-11 保留扩展点、CA-13 场景驱动延后、CA-14/16/17/18 接受差异——但其中 CA-3/CA-9 的实施经第二轮复核发现未测路径缺陷（P0-1/2/3/7，见 19 §1）。历史残留跟踪点：
+**CAV 系列（§3.4，19 号第二轮复核）已全部收敛（P64-P69 六批）**；**P70 观测性专项（ADR-0018）已落地**（OTel 三层：apply/entry/group-tx/hotupdate span + actor 边界日志/指标 + hotupdate.operations/writer.failures 计数，483 测试全绿）。**P71 硬编码审计批已收敛（14 §7.66）**：修复 KeystoneSettings 配置断线（宿主零消费 → FrameworkSettings 贯穿 PluginRuntime；删 PluginDirectory/DefaultConcurrency/LogLevel 死字段——日志配置唯一面 = ServiceOptions["logger"]）+ 7 处硬编码可调值入配置（watcher 防抖/写回重试与防抖/结果缓存容量，默认值不变），497 测试全绿。CA 系列（§3.3，18 项）已全部收敛（P57-P63）：11 项已实施、CA-8 弃用（ADR-0016）、CA-11 保留扩展点、CA-13 场景驱动延后、CA-14/16/17/18 接受差异——但其中 CA-3/CA-9 的实施经第二轮复核发现未测路径缺陷（P0-1/2/3/7，见 19 §1）。历史残留跟踪点：
 
 | 项 | 性质 | 实现期动作 |
 |----|------|-----------|

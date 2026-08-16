@@ -1152,6 +1152,17 @@ created: 2026-08-15
 | T4 插件生命周期日志（P1） | PluginRuntime start/fail/stop 边界 LoggerMessage 源生成（6101-6103，category={域}/{插件ID}）——修复前生命周期只有事实无结构化日志 | PluginRuntime.cs | PluginLifecycleLoggingTests 2 例（start/stop 双日志 + init 失败 Error）；489/489；Runtime AOT 零 IL | ✔ |
 | T5 监督事实落盘修复（P1） | EmitFireAndForget → PublishParallelAsync 此前不持久化事实——ActorRestartedFact 经 fire-and-forget 发射从未入审计流（违背 ADR-0018 L2）；PublishParallelAsync 补 PersistFactAsync（与 EmitAsync 同序） | EventBus.cs | FactPersistenceTests 1 例（Publishing_fact_via_parallel_persists_to_store）；490/490；Runtime AOT 零 IL | ✔ |
 
+### 7.66 P71 硬编码审计批（配置合规，AGENTS.md"禁止硬编码"复盘）
+
+> 起点：全仓扫描硬编码可调值 + 核对配置面接线。发现 1 处配置基础设施整体断线
+>（KeystoneSettings.Bind 存在但宿主零消费）+ 7 处硬编码可调值；同时确认超时/阈值类
+> 大部分已健康在配置面（ObservabilityOptions/KeystoneHostOptions/Supervision/CircuitBreaker）。
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| W71-01 T1 FrameworkSettings 接线（P0） | 修复配置断线：KeystoneHostOptions.FrameworkSettings（可直接赋值或经 Bind 从 keystone 节绑定）→ PluginLoader.CreateAsync → PluginRuntime（含 D-1 原地热更重建保持同值）；宿主三处 CreateAsync 下传。死字段处置：删 PluginDirectory/DefaultConcurrency/LogLevel（零消费者；日志配置唯一面 = ServiceOptions["logger"]） | KeystoneHostOptions.cs / KeystoneHost.cs / PluginLoader.cs / KeystoneSettings.cs | FrameworkSettingsWiringTests 2 例（断言级红：依赖超时实测 30s→300ms / quiesce 6s 自然完成→200ms 强制收敛）；KeystoneSettingsTests 改 2 字段；492/492；Runtime+Hosting AOT 零 IL | ✔ |
+| W71-02 T2 硬编码入配置面（P1） | 7 处可调值全部入配置（默认不变，向后兼容）：WatcherOptions（config/plugin 防抖 100ms）；ConfigWriterOptions → ConfigFileWriter 构造参数（占用重试 10/拒绝退避 3/防抖 50ms/退避步长 50ms）；KeystoneHostOptions.ResultCacheCapacity（1024）→ Domain.Create/Spawn → CapabilityActor（DC-13 FIFO 上限） | WatcherOptions.cs（新）/ ConfigWriterOptions.cs（新）/ KeystoneHostOptions.cs / ConfigFileWatcher.cs / PluginFileWatcher.cs / ConfigFileWriter.cs / CapabilityDomain.cs / CapabilityActor.cs | WriterOptionsTests 2 例（"after 2 attempts" 消息 + WriteAttempts==3 / 1ms 防抖立即落盘）+ WatcherOptionsWiringTests 2 例（探针 123ms/234ms）+ ResultCacheCapacityTests 1 例（容量 2 淘汰重执行 3→4）；497/497；Runtime/Config/Hosting AOT 零 IL | ✔ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -1292,6 +1303,7 @@ created: 2026-08-15
 | ID-52 | 发现接口收窄；同步契约；锁内发事件隐患证实 | `docs/`（18） | W56-01~03 |
 | W70-01 | ADR-0018；05 §5 | `src/Keystone.Hosting/KeystoneHost.cs`、`src/Keystone.Runtime/Trace/`、`src/Keystone.Runtime/Actors/`、`src/Keystone.Runtime/Plugins/Loading/PluginLoader.cs` | ObservabilityWiringTests(2) + ActorObservabilityTests(5) + ConfigObservabilityTests(4) + Trace 迁移(3) |
 | W70-02 | ADR-0018；05 §5 | `src/Keystone.Hosting/KeystoneHost.cs`、`src/Keystone.Runtime/Actors/CapabilityActor.cs`、`src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`src/Keystone.Runtime/Events/ActorStoppedFact.cs`、`src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | ObservabilityWiringTests(+2) + ActorObservabilityTests(+3) + PluginLifecycleLoggingTests(2) |
+| W71 | ADR-0013；AGENTS.md 项目定位（禁止硬编码） | `src/Keystone.Core/KeystoneSettings.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs`、`src/Keystone.Hosting/KeystoneHost.cs`、`src/Keystone.Hosting/WatcherOptions.cs`、`src/Keystone.Hosting/ConfigWriterOptions.cs`、`src/Keystone.Runtime/Plugins/Loading/PluginLoader.cs`、`src/Keystone.Config/Persistence/ConfigFileWriter.cs`、`src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`src/Keystone.Runtime/Actors/CapabilityActor.cs` | FrameworkSettingsWiringTests(2) + WriterOptionsTests(2) + WatcherOptionsWiringTests(2) + ResultCacheCapacityTests(1) |
 
 ## 9. 维护规则
 
