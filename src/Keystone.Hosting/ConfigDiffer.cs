@@ -14,10 +14,10 @@ public static class ConfigDiffer
         ArgumentNullException.ThrowIfNull(oldTree);
         ArgumentNullException.ThrowIfNull(newTree);
 
-        var oldById = Flatten(oldTree).ToDictionary(e => e.Id!, e => e, StringComparer.Ordinal);
-        var newById = Flatten(newTree).ToDictionary(e => e.Id!, e => e, StringComparer.Ordinal);
+        var oldById = Flatten(oldTree).ToDictionary(e => e.Entry.Id!, e => e, StringComparer.Ordinal);
+        var newById = Flatten(newTree).ToDictionary(e => e.Entry.Id!, e => e, StringComparer.Ordinal);
 
-        var added = newById.Values.Where(e => !oldById.ContainsKey(e.Id!)).ToList();
+        var added = newById.Values.Where(e => !oldById.ContainsKey(e.Entry.Id!)).Select(e => e.Entry).ToList();
         var removed = oldById.Keys.Where(id => !newById.ContainsKey(id)).ToList();
 
         var configChanged = new List<EntryOptions>();
@@ -30,34 +30,36 @@ public static class ConfigDiffer
                 continue; // 新增已归 added
             }
 
-            if (oldEntry.Disabled != newEntry.Disabled)
+            if (oldEntry.Entry.Disabled != newEntry.Entry.Disabled)
             {
-                disabledFlips.Add(newEntry); // disabled 翻转优先（挂起/恢复路径）
+                disabledFlips.Add(newEntry.Entry); // disabled 翻转优先（挂起/恢复路径）
                 continue;
             }
 
             if (!string.Equals(StructuralKey(oldEntry), StructuralKey(newEntry), StringComparison.Ordinal))
             {
-                structurallyChanged.Add(newEntry); // name/inject/isolate 变 → 冷重启
+                structurallyChanged.Add(newEntry.Entry); // name/inject/isolate（生效域）变 → 冷重启
             }
-            else if (!ConfigEquals(oldEntry.Config, newEntry.Config))
+            else if (!ConfigEquals(oldEntry.Entry.Config, newEntry.Entry.Config))
             {
-                configChanged.Add(newEntry); // 仅 config 变 → 热更新
+                configChanged.Add(newEntry.Entry); // 仅 config 变 → 热更新
             }
         }
 
         return new ConfigDiff(added, removed, configChanged, structurallyChanged, disabledFlips);
     }
 
-    /// <summary>扁平化（组递归展开——比对按叶/组条目 id 全集）。</summary>
-    private static IEnumerable<EntryOptions> Flatten(IReadOnlyList<EntryOptions> entries)
+    /// <summary>扁平化（组递归展开——比对按叶/组条目 id 全集）。携带生效 isolate map（谱系累积，P57-T5）。</summary>
+    private static IEnumerable<EffectiveEntry> Flatten(IReadOnlyList<EntryOptions> entries, Dictionary<string, string>? inherited = null)
     {
         foreach (var entry in entries)
         {
-            yield return entry;
+            var map = inherited is null ? [] : new Dictionary<string, string>(inherited, StringComparer.Ordinal);
+            IsolateMapResolver.Apply(entry, map);
+            yield return new EffectiveEntry(entry, map);
             if (entry.Group is { } children)
             {
-                foreach (var child in Flatten(children))
+                foreach (var child in Flatten(children, map))
                 {
                     yield return child;
                 }
@@ -65,17 +67,14 @@ public static class ConfigDiffer
         }
     }
 
-    /// <summary>结构键：冷重启判定的字段（08 §6.1：name/inject/group 变 → 冷重启）。isolate 按名排序 + 档位编码（diff 稳定）。</summary>
-    private static string StructuralKey(EntryOptions e)
-        => $"{e.Name}|{string.Join(",", e.Inject)}|{string.Join(",", e.Isolate.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(FormatIsolate))}";
+    /// <summary>结构键：冷重启判定字段（08 §6.1：name/inject/isolate 变 → 冷重启）。
+    /// isolate 用生效 realm（#声明处Id/@label，谱系解析）——组级声明变化会改变叶子生效键 → 叶子冷重启（F10）。</summary>
+    private static string StructuralKey(EffectiveEntry e)
+        => $"{e.Entry.Name}|{string.Join(",", e.Entry.Inject)}|"
+        + string.Join(",", e.EffectiveIsolate.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => $"{kv.Key}={kv.Value}"));
 
-    private static string FormatIsolate(KeyValuePair<string, IsolateSpec> kv)
-        => kv.Value.Kind switch
-        {
-            IsolateKind.Private => $"{kv.Key}=true",
-            IsolateKind.Shared => $"{kv.Key}@{kv.Value.Label}",
-            _ => $"{kv.Key}=false",
-        };
+    private sealed record EffectiveEntry(EntryOptions Entry, Dictionary<string, string> EffectiveIsolate);
 
     /// <summary>config 比对（引用相等短路；字典值逐键比——YAML 重读必是新实例）。</summary>
     private static bool ConfigEquals(object? oldConfig, object? newConfig)

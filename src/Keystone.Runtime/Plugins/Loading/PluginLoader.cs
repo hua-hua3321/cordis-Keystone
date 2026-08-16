@@ -22,16 +22,20 @@ public sealed class PluginLoader : IAsyncDisposable
     private PluginRuntime? _runtime;
     private WeakReference? _unloadedAlc;
 
+    private readonly IReadOnlyDictionary<string, string>? _isolateMap;
+
     private PluginLoader(
         PluginManifest manifest,
         IServiceDiscovery discovery,
         Func<string, IPluginContext> contextFactory,
-        IReadOnlyDictionary<string, object?>? config = null)
+        IReadOnlyDictionary<string, object?>? config = null,
+        IReadOnlyDictionary<string, string>? isolateMap = null)
     {
         _manifest = manifest;
         _discovery = discovery;
         _contextFactory = contextFactory;
         _config = config ?? new Dictionary<string, object?>(StringComparer.Ordinal);
+        _isolateMap = isolateMap;
     }
 
     /// <summary>当前插件运行时（ACTIVE 后可用）。</summary>
@@ -46,14 +50,15 @@ public sealed class PluginLoader : IAsyncDisposable
         PluginManifest manifest,
         IServiceDiscovery discovery,
         Func<string, IPluginContext> contextFactory,
-        IReadOnlyDictionary<string, object?>? config = null)
+        IReadOnlyDictionary<string, object?>? config = null,
+        IReadOnlyDictionary<string, string>? isolateMap = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(discovery);
         ArgumentNullException.ThrowIfNull(contextFactory);
 
-        var loader = new PluginLoader(manifest, discovery, contextFactory, config);
+        var loader = new PluginLoader(manifest, discovery, contextFactory, config, isolateMap);
         await loader.LoadSourceAsync(source).ConfigureAwait(false);
         return loader;
     }
@@ -128,7 +133,7 @@ public sealed class PluginLoader : IAsyncDisposable
             ?? throw new KeystoneException(ErrorCode.LifecycleLoadFailed, $"plugin '{source.Id}' could not be instantiated");
 
         _alc = alc;
-        _runtime = new PluginRuntime(_manifest, _ => plugin, _discovery, _contextFactory, config: _config);
+        _runtime = new PluginRuntime(_manifest, _ => plugin, _discovery, _contextFactory, _isolateMap, _config);
         await _runtime.StartAsync().ConfigureAwait(false);
     }
 }

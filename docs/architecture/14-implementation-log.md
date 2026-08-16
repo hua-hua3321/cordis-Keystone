@@ -866,7 +866,7 @@ created: 2026-08-15
 | T2 KeyedServiceStore | ConcurrentDictionary<(name,realm),(value,ownerId)> + Lock 复合写（属主校验+写）+ **出锁批量通知**（scope 合并）+ IsAvailable=ContainsKey + Provide 返回删键 disposer | Keystone.Runtime/Context 新增组件（纯新增不接线） | 17 个新测试红→绿（跨属主拒绝/同属主重绑/删键属主校验/disposer 幂等/跨线程回调不死锁/单键直发/scope 合并/嵌套并入/remove 并入 scope/按域分区/退订停投/16 线程竞写恰一胜者）；全量 362 绿；Runtime AOT 0 IL；提交 | ✔ 2026-08-16 |
 | T3 ContextFacade 接线 | facade 持共享 root store（独立 root 自持）；realm 沿链推导（isolate map 子继承父/子影子覆盖/均无→""）；Resolve 算 realm 查共享 store；Provide 带 realm+disposer 追踪；RemoveOwnedServices 逐 disposer 幂等清理 | ContextFacade/IContext/删 ServiceStore+IServiceStore+ServiceStoreTests + 2 测试调用点 | 14 新测试红→绿（兄弟可见/属主冲突/重绑/幂等清理/私有对无 map 隐藏/双私有隔离/同 label 互见/链继承/子影子覆盖/按名隔离不连坐/同 realm 冲突/GetLazy/独立 root 自持/GatingServiceNotFound）；全量 371 绿；AOT；提交 | ✔ 2026-08-16 |
 | T4 发现投影+门控统一 | IServiceRegistry→IServiceDiscovery 只读投影（IsAvailable(name,realm)+Subscribe+AvailableServices）；PluginRuntime 删双注册；门控带 realm；init 后校验 provides⊆owned | ServiceRegistry/IServiceRegistry/PluginRuntime/PluginLoader/KeystoneHost + Runtime/Hosting 测试 | 门控/依赖恢复（G-C2）/DC-5 诊断全绿；provides 未 Provide → 明确 FAILED；全绿；AOT；提交 | ✔ 2026-08-16 |
-| T5 宿主端到端 | 三 context 工厂按 entry.Isolate 算 realm；组谱系 #groupId 推导；isolate 变更触发依赖方重载（F10） | KeystoneHost + Hosting.Tests | e2e：同 label 共享/私有隔离/默认共享；配置改 isolate → 受影响条目重载；全绿；AOT；提交 | ⏳ |
+| T5 宿主端到端 | 三 context 工厂按 entry.Isolate 算 realm；组谱系 #groupId 推导；isolate 变更触发依赖方重载（F10） | KeystoneHost + ConfigDiffer + IsolateMapResolver(Config) + PluginLoader + Hosting.Tests | e2e：同 label 共享/私有隔离/默认共享；配置改 isolate → 受影响条目重载；全绿；AOT；提交 | ✔ 2026-08-16 |
 | T6 总验收 | 全量回归 + 六工程 AOT + 文档回写（02/03/08/09/10/11/14/18/AGENTS）+ CA-1 标记已实施 | 全仓 | 345+N 全绿；AOT 全零 IL；文档同步；frontmatter；最终提交 | ⏳ |
 
 #### T3 执行记录（2026-08-16）
@@ -889,6 +889,17 @@ created: 2026-08-15
 | W57-T4-05 | scope 冲刷改集合语义（Distinct，对齐 Cordis notify(names[])）——同键增删并入只投一次 | 修复 | 投影批量测试 3→2 项 | ✅ |
 | W57-T4-06 | 修两处既有 flake（暴露于本任务时序变化）：① ConfigInjectionTests 跨 ALC 同名类型改每测试唯一名；② HotReloadTests 跨 ALC 读取改全副本扫描（int 取最大/string Any 断言）——GetAssemblies() 跨 LoadContext 无"最新在后"保证 | 修复 | 各自连续 5-10 次复跑零失败 | ✅ |
 | W57-T4-07 | 全量回归 372/372（Runtime 169→172：+6 新 −3 删；Hosting 54→52：−2 registry 单测，覆盖面由 KeyedServiceStoreTests/投影测试承接）；Runtime+Hosting AOT 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
+
+#### T5 执行记录（2026-08-16）
+
+| # | 内容 | 方式 | 验证 | 状态 |
+|---|------|------|------|------|
+| W57-T5-01 | 红测试 5 个（IsolateEndToEndTests：组私有域双向路由/@label 跨组路由+异 label 不串/叶自声明独占+不泄漏/F10 组声明移除域迁移端到端/F10 label 整体迁移不悬死） | TDD | 初版 5/5 失败（isolate 未接线，全部经 "" 互见） | ✅ |
+| W57-T5-02 | IsolateMapResolver（Keystone.Config）：entry.Isolate → name→realm（Private→#声明处Id 组声明=组内共享/叶自声明=独占；Shared→@label；None→移除解除继承）；谱系外→内累积，子影子覆盖父（对齐 context.isolate() 原型链 shadow） | 实现 | Cordis 源码对照：reflect.provide `store[key=ctx[isolate][name]]`、notify 按域 filter、resolve 同键路由——三方一致 | ✅ |
+| W57-T5-03 | ConfigDiffer 结构键改生效 realm（EffectiveEntry 谱系解析）——组级 isolate 声明变化会改变叶子生效键 → 叶子冷重启（F10 组谱系传播） | 实现 | 域迁移测试断言 rm_p/rm_c 重载、rm_fresh 不重载 | ✅ |
+| W57-T5-04 | KeystoneHost：BuildIsolateMap（根→目标谱系链解析）+ FindEntryPath；三工厂（LoadEntry/Reload/Mount）同 map 注入 context 工厂与 PluginLoader（门控域==解析域）；ApplyStructuralChangesAsync 两阶段（先整体替换树再逐叶冷重启——组声明先落位，叶子重载读到新谱系） | 实现 | — | ✅ |
+| W57-T5-05 | 测试证明手法迭代（2 版）：初版"消极挂起断言"踩宿主加载语义（LoadSourceAsync await 终态，门控不满足阻塞 30s）+ 类型名跨测试并行撞 ALC；终版改值路由证明（各域放可区分值按解析结果断言，全积极断言不阻塞）+ 类型名全套件唯一 | 修复 | 5/5 绿；Hosting 57 测试复跑 3 次零失败 | ✅ |
+| W57-T5-06 | 全量回归 377/377（Hosting 52→57：+5）；Config+Hosting AOT 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
 
 #### T2 执行记录（2026-08-16）
 

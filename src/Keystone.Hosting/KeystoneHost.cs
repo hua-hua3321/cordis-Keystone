@@ -372,8 +372,9 @@ public sealed class KeystoneHost : IAsyncDisposable
             _plugins.Remove(hosted);
         }
 
+        var isolateMap = BuildIsolateMap(id);
         var loader = await PluginLoader.CreateAsync(
-            source, manifest, _discovery, ctxId => new ContextFacade(ctxId, _rootContext), config).ConfigureAwait(false);
+            source, manifest, _discovery, ctxId => new ContextFacade(ctxId, _rootContext, isolateMap: isolateMap), config, isolateMap).ConfigureAwait(false);
 
         _plugins.Add(new HostedPlugin(id, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(entry));
@@ -455,13 +456,8 @@ public sealed class KeystoneHost : IAsyncDisposable
                 await SetEntryDisabledAsync(entry.Id!, entry.Disabled == true).ConfigureAwait(false);
             }
 
-            // 结构变 → 冷重启
-            foreach (var entry in diff.StructurallyChanged)
-            {
-                PluginReloading?.Invoke(this, new PluginReloadingEventArgs(entry.Id!));
-                ReplaceEntry(_tree, entry);
-                await ReloadPluginAsync(entry.Id!).ConfigureAwait(false);
-            }
+            // 结构变 → 冷重启（两阶段，P57-T5）
+            await ApplyStructuralChangesAsync(diff.StructurallyChanged).ConfigureAwait(false);
 
             // 仅 config 变 → 热更新（瀑布可否决；内部含写回）
             foreach (var entry in diff.ConfigChanged)
@@ -475,6 +471,22 @@ public sealed class KeystoneHost : IAsyncDisposable
         finally
         {
             _applyingConfig = false;
+        }
+    }
+
+    /// <summary>结构变应用（两阶段，P57-T5）：先整体替换树——组级 isolate 声明先落位，
+    /// 叶子重载时 BuildIsolateMap 读到的已是新谱系；再逐叶子冷重启（组条目本身无运行时）。</summary>
+    private async Task ApplyStructuralChangesAsync(IReadOnlyList<Keystone.Config.Entries.EntryOptions> changed)
+    {
+        foreach (var entry in changed)
+        {
+            ReplaceEntry(_tree, entry);
+        }
+
+        foreach (var entry in changed.Where(e => !e.IsGroup))
+        {
+            PluginReloading?.Invoke(this, new PluginReloadingEventArgs(entry.Id!));
+            await ReloadPluginAsync(entry.Id!).ConfigureAwait(false);
         }
     }
 
@@ -538,6 +550,34 @@ public sealed class KeystoneHost : IAsyncDisposable
 
     // ── 内部 ──
 
+    /// <summary>条目生效 isolate map（P57-T5）：沿谱系外→内累积（组声明 #groupId / 叶自声明 #leafId / @label）。
+    /// 同一 map 同时注入 context 工厂与 PluginRuntime（门控域 == 解析域，18 §2 第 3 步）。</summary>
+    private IReadOnlyDictionary<string, string>? BuildIsolateMap(string entryId)
+        => IsolateMapResolver.Resolve(FindEntryPath(_tree, entryId) ?? []);
+
+    /// <summary>根→目标的谱系链（含目标自身；用于 isolate 生效域解析）。</summary>
+    private static List<EntryOptions>? FindEntryPath(IReadOnlyList<EntryOptions> entries, string id, List<EntryOptions>? path = null)
+    {
+        path ??= [];
+        foreach (var entry in entries)
+        {
+            path.Add(entry);
+            if (string.Equals(entry.Id, id, StringComparison.Ordinal))
+            {
+                return path;
+            }
+
+            if (entry.Group is { } children && FindEntryPath(children, id, path) is { } found)
+            {
+                return found;
+            }
+
+            path.RemoveAt(path.Count - 1);
+        }
+
+        return null;
+    }
+
     private async Task LoadEntryAsync(EntryOptions entry)
     {
         var manifest = _options.ManifestProvider(entry);
@@ -559,8 +599,9 @@ public sealed class KeystoneHost : IAsyncDisposable
             return;
         }
 
+        var isolateMap = BuildIsolateMap(entry.Id!);
         var loader = await PluginLoader.CreateAsync(
-            source, manifest, _discovery, id => new ContextFacade(id, _rootContext), config).ConfigureAwait(false);
+            source, manifest, _discovery, id => new ContextFacade(id, _rootContext, isolateMap: isolateMap), config, isolateMap).ConfigureAwait(false);
         _plugins.Add(new HostedPlugin(entry.Id!, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(entry)); // 统一加载入口（F9）
     }
