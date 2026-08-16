@@ -94,9 +94,10 @@ public sealed class ContextFacade : IPluginContext, IContext
     /// <summary>
     /// 服务解析（18 §2 CA-1）：按本链推导的 realm 查共享 KeyedServiceStore——
     /// 组合语义（默认共享域 ""）与隔离语义（isolate map 命中 → 私有/命名域）统一为键查。
+    /// D-7：自读带属主——init 暂存期自读自暂存值（他人仍不可见）。
     /// </summary>
     private T? Resolve<T>(string serviceName)
-        => _store.TryGet<T>(serviceName, ResolveRealm(serviceName));
+        => _store.TryGet<T>(serviceName, ResolveRealm(serviceName), ownerId: Name);
 
     /// <summary>
     /// realm 沿链推导（对齐 Cordis ctx[symbols.isolate] 原型链查找）：自本 context 向上，
@@ -122,12 +123,33 @@ public sealed class ContextFacade : IPluginContext, IContext
         NotifyWrite(serviceName, instance);
 
         // 18 §2 CA-1：值即注册——按本链 realm 写共享 store（组合 = 默认共享域；isolate = 私有/命名域）；
-        // disposer 记入 _provides（G-C3 属主追踪），卸载时 dispose 即删键 + Removed 通知
+        // disposer 记入 _provides（G-C3 属主追踪），卸载时 dispose 即删键 + Removed 通知；
+        // D-7：属主暂存激活时 Provide 自动走暂存（不可见）——Commit/InitStaging 由 PluginRuntime 控制
         var realm = ResolveRealm(serviceName);
         var disposer = _store.Provide(serviceName, realm, instance, ownerId: Name);
         lock (_providesLock)
         {
             _provides.Add((serviceName, realm, disposer));
+        }
+    }
+
+    /// <summary>D-7（19 号审计 SV-2）：开启属主暂存——init 期 provide 延迟到 Commit（= ACTIVE 补发）。</summary>
+    public IDisposable BeginProvidesStaging() => _store.BeginStaging(Name);
+
+    /// <summary>D-7：提交暂存（ACTIVE 后调用——落库 + 单次合并通知）。</summary>
+    public void CommitProvidesStaging() => _store.CommitStaging(Name);
+
+    /// <summary>D-7：弃置暂存（FAILED——init 期提供的值从未可见）。</summary>
+    public void DiscardProvidesStaging() => _store.DiscardStaging(Name);
+
+    /// <summary>P2-16（19 号审计 SV-7）：本 context（属主）是否提供过该服务名（realm 按本链推导）。</summary>
+    public bool HasProvided(string serviceName)
+    {
+        var realm = ResolveRealm(serviceName);
+        lock (_providesLock)
+        {
+            return _provides.Any(p => string.Equals(p.Name, serviceName, StringComparison.Ordinal)
+                && string.Equals(p.Realm, realm, StringComparison.Ordinal));
         }
     }
 

@@ -48,8 +48,8 @@ public class DependencyReArmTests
 
         // 依赖消失 → 依赖方卸载（DISPOSED）
         store.Remove("fs", string.Empty, "provider-x");
-        await WaitForStateAsync(runtime, PluginLifecycleState.Disposed);
-        Assert.Equal(PluginLifecycleState.Disposed, runtime.State);
+        await WaitForStateAsync(runtime, PluginLifecycleState.Pending); // P2-13：可 re-arm 存活态（原 Disposed）
+        Assert.Equal(PluginLifecycleState.Pending, runtime.State);
         Assert.Equal(1, plugin.DisposeCount);
 
         // 依赖重现 → 依赖方自动重启（G-C2 re-arm）

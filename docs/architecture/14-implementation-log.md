@@ -1053,6 +1053,21 @@ created: 2026-08-15
 | T7 回归 | 全量 6 套件 | 新增 11 测试（净 +10：删 EntryGroupTests 5） | 431/431；Hosting AOT 零 IL 警告 | ✔ |
 | T8 并发加固（回归期发现） | PluginLoader.DisposeAsync/ReloadAsync 互斥（_disposeLock + _disposed 一次性进入）——watcher 触发的 reload 与宿主 Shutdown 并发时旧实现两侧都过 null 检查 → 已清字段 NRE（全量并行下 ~1/4 复现） | PluginLoader.cs | Hosting 套件连跑 6 轮 + 全量并行多轮零复现 | ✔ |
 
+#### W66-01 P66：状态机与门控批（19 §2/§3/§4：P1-1..5 + D-7 + P2-13 + P2-14 + P2-16）
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| T1 AwaitAsync 真等待（P1-1） | _settled 死字段修复——StartCoreAsync/RestartAsync 建 TCS（RunContinuationsAsynchronously），Active/Failed/Disposed/Pending-落定 CompleteSettled；AwaitAsync 对 Pending/Loading await settled（修复前立即返回） | PluginRuntime.cs | AwaitAsync_waits_until_terminal_state（PENDING 等待场景） | ✔ |
+| T2 停止取消在途等待（P1-2） | _lifecycleCts 每启动重建；StopCoreAsync 入口 Cancel；WaitForDependenciesAsync 链接取消；取消异常 → 静默返回（不翻 FAILED——停方接管状态机）；init 成功后取消检查 → 弃暂存 + 补收敛 | PluginRuntime.cs | Stop_during_pending_wait_does_not_flip_failed（终态 Disposed） | ✔ |
+| T3 停止互斥门（P1-3） | _stopGate SemaphoreSlim(1,1)——并发停止串行化，后到者见落定态直返（恰一次 quiesce/dispose）；终态停并入 rearm 停时补转移 PENDING→DISPOSED | PluginRuntime.cs | Concurrent_stops_dispose_plugin_exactly_once | ✔ |
+| T4 rearm 全路径无未观察异常（P1-4） | FireAndForget(ObserveAsync)——吞异常观察；Unloading 期依赖重现 → StartAfterUnloadSettlesAsync（先并入在途卸载再启动）；启动在途并发调用幂等返回（_startBusy） | PluginRuntime.cs | 行为路径（随 P2-13 用例覆盖） | ✔ |
+| T5 Loading 期依赖消失（P1-5） | StopAfterLoadSettlesAsync——AwaitAsync 等加载收敛后卸载（对齐 fiber.ts:665-672 epoch 对比：加载完成再卸，不中途撕裂 init） | PluginRuntime.cs | Dependency_loss_during_loading_unloads_to_pending | ✔ |
+| T6 PENDING re-arm 语义（P2-13） | 依赖消失卸载落 Pending（_rearmedPending 标记，区别于初始等待）；依赖重现 → 自动重启；FAILED 随依赖变化重评（RestartIfFailedAsync）；显式 StopAsync 仍终态 Disposed（订阅销毁） | PluginRuntime.cs | Dependency_loss_lands_pending_and_reappearance_restarts + 三处旧断言更新（DiscoveryGating/DependencyReArm/PluginRuntimeTests） | ✔ |
+| T7 门控 ACTIVE 时机（D-7） | KeyedServiceStore 属主暂存区：BeginStaging/Commit/Discard——init 期 Provide 暂存（外部 IsAvailable/Get 不可见、无通知），ACTIVE 后 Commit 落库 + 单次合并通知（= Cordis reflect.ts:294-296 ACTIVE 补发）；自读带 ownerId 可见暂存值；FAILED → Discard（值从未可见） | KeyedServiceStore.cs/ContextFacade.cs/PluginRuntime.cs | Provider_mid_init_provide_does_not_release_dependent | ✔ |
+| T8 provides 属主校验（P2-16） | 兑现检查改 facade.HasProvided（属主本人 + realm 匹配）——他人同名同域值不再蒙混（原 IsAvailable 只查可用） | PluginRuntime.cs | Provides_fulfillment_requires_owner | ✔ |
+| T9 root effects 收敛（P2-14） | ShutdownAsync 增 _rootContext.DisposeEffectsAsync()（宿主自注册资源不再进程级泄漏） | KeystoneHost.cs | 代码路径（回归覆盖） | ✔ |
+| T10 回归 | 全量 6 套件 | 新增 7 测试；MA0051 拆分 WireDependencyRearm/CleanupCancelledStartAsync/TransitionToFailedAsync/QuiesceAllPluginsAsync | 438/438；Hosting AOT 零 IL 警告 | ✔ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |

@@ -197,27 +197,9 @@ public sealed class KeystoneHost : IAsyncDisposable
     }
 
     /// <summary>全局 quiesce（09 §4）：逐插件 quiesce（含 ALC 卸载）；幂等。</summary>
-    public async Task ShutdownAsync()
+    /// <summary>逐插件 quiesce + 总关闭超时 + 未收敛审计（ShutdownAsync 步骤②拆分，MA0051）。</summary>
+    private async Task<List<string>> QuiesceAllPluginsAsync()
     {
-        if (_shutdown)
-        {
-            return;
-        }
-
-        // DC-3（09 §4）：① 入口拒绝（后续 CreateEntry/Mount/Reload 直接拒绝）
-        _shutdown = true;
-
-        // DC-15：排空写回队列（挂起的 CRUD 变更落盘后再 quiesce）
-        try
-        {
-            await FlushConfigAsync().ConfigureAwait(false);
-        }
-        catch (KeystoneException)
-        {
-            // 写回失败（占用/只读）：不阻断关闭（08 §6.3 readonly——报错不崩溃）
-        }
-
-        // ② 逐插件 quiesce（ADR-0005 五步闸门），带总关闭超时 + 未收敛审计（09 §4 第 6 步）
         var uncollected = new List<string>();
         using var cts = new CancellationTokenSource(_options.ShutdownTimeout);
         var tasks = _plugins.Select(async plugin =>
@@ -241,14 +223,41 @@ public sealed class KeystoneHost : IAsyncDisposable
             uncollected.AddRange(_plugins.Select(p => p.EntryId));
         }
 
-        if (uncollected.Count > 0)
+        return uncollected;
+    }
+
+    public async Task ShutdownAsync()
+    {
+        if (_shutdown)
         {
-            _uncollectedPlugins = [.. uncollected];
+            return;
         }
 
+        // DC-3（09 §4）：① 入口拒绝（后续 CreateEntry/Mount/Reload 直接拒绝）
+        _shutdown = true;
+
+        // DC-15：排空写回队列（挂起的 CRUD 变更落盘后再 quiesce）
+        try
+        {
+            await FlushConfigAsync().ConfigureAwait(false);
+        }
+        catch (KeystoneException)
+        {
+            // 写回失败（占用/只读）：不阻断关闭（08 §6.3 readonly——报错不崩溃）
+        }
+
+        // ② 逐插件 quiesce（ADR-0005 五步闸门），带总关闭超时 + 未收敛审计（09 §4 第 6 步）
+        _uncollectedPlugins = [.. await QuiesceAllPluginsAsync().ConfigureAwait(false)];
         _plugins.Clear();
         _tree.Clear();
         _failedEntries.Clear();
+
+        // P2-14（19 号审计 CF-11）：root context 的 effect 无人收敛 → 进程级泄漏
+        //（宿主自身经 _rootContext.Effect 注册的资源，ShutdownAsync 收敛）
+        if (_rootContext is not null)
+        {
+            await _rootContext.DisposeEffectsAsync().ConfigureAwait(false);
+        }
 
         // ③ 停能力域监督树（不再重启，防关闭期"复活"，09 §4 第 4 步）
         if (_capabilityDomain is not null)

@@ -20,6 +20,9 @@ public sealed class KeyedServiceStore
     // 订阅者（copy-on-write：订阅/退订锁内换列表；触发前锁内取快照、锁外遍历）
     private List<Action<IReadOnlyList<ServiceKey>>> _handlers = [];
 
+    // 属主暂存区（D-7）：ownerId → 暂存键值（init 期 provide 延迟到 ACTIVE 提交）
+    private readonly ConcurrentDictionary<string, List<(ServiceKey Key, object Value)>> _staging = new(StringComparer.Ordinal);
+
     // 活动通知 scope 栈顶（锁内维护；dispose 弹出，栈空后出锁统一发累积变更）
     private NotifyScope? _activeScope;
 
@@ -37,6 +40,8 @@ public sealed class KeyedServiceStore
     /// <summary>
     /// 注册服务值（值即注册）：写键并返回删键 disposer（dispose = 属主移除 + Removed 通知；已移除则幂等无操作）。
     /// 同键同属主 = rebind（G14 允许，值更新）；同键异属主 = ServiceAlreadyRegistered。
+    /// D-7（19 号审计 SV-2）：属主暂存激活时写入暂存区（不可见、无通知）——CommitStaging 才落库 + 合并通知
+    /// （对齐 Cordis：init 期 provide 不 notify，fiber ACTIVE 转换才补发）。
     /// </summary>
     public IDisposable Provide<T>(string serviceName, string realm, T value, string ownerId)
     {
@@ -44,41 +49,124 @@ public sealed class KeyedServiceStore
         ArgumentNullException.ThrowIfNull(value);
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
 
+        if (_staging.TryGetValue(ownerId, out var staged))
+        {
+            lock (staged)
+            {
+                staged.RemoveAll(e => e.Key == key); // 同键重bind = 覆盖暂存
+                staged.Add((key, value));
+            }
+
+            return new Disposer(this, key, ownerId);
+        }
+
         var immediate = WriteWithOwnerCheck(key, value, ownerId);
         NotifyIfPresent(immediate);
         return new Disposer(this, key, ownerId);
     }
 
-    /// <summary>读值（无锁热路径）：缺失返回 default。</summary>
-    public T? TryGet<T>(string serviceName, string realm)
+    /// <summary>读值（无锁热路径）：缺失返回 default。ownerId 给出时先查属主暂存（自读自暂存值）。</summary>
+    public T? TryGet<T>(string serviceName, string realm, string? ownerId = null)
     {
         ValidateKey(serviceName, realm);
-        return _services.TryGetValue(new ServiceKey(serviceName, realm), out var entry) ? (T)entry.Value : default;
+        var key = new ServiceKey(serviceName, realm);
+        if (ownerId is not null && _staging.TryGetValue(ownerId, out var staged))
+        {
+            lock (staged)
+            {
+                foreach (var (k, v) in staged)
+                {
+                    if (k == key)
+                    {
+                        return (T)v;
+                    }
+                }
+            }
+        }
+
+        return _services.TryGetValue(key, out var entry) ? (T)entry.Value : default;
     }
 
     /// <summary>读值：缺失抛 <see cref="ErrorCode.GatingServiceNotFound"/>。</summary>
-    public T Get<T>(string serviceName, string realm)
-        => TryGet<T>(serviceName, realm)
+    public T Get<T>(string serviceName, string realm, string? ownerId = null)
+        => TryGet<T>(serviceName, realm, ownerId)
             ?? throw new KeystoneException(
                 ErrorCode.GatingServiceNotFound,
                 $"service '{serviceName}' (realm '{realm}') is not provided");
 
-    /// <summary>可用 = 值存在（无锁热路径，单一事实源）。</summary>
+    /// <summary>可用 = 值存在（无锁热路径，单一事实源）。暂存值不计（D-7：提供者 ACTIVE 前门控不可见）。</summary>
     public bool IsAvailable(string serviceName, string realm)
     {
         ValidateKey(serviceName, realm);
         return _services.ContainsKey(new ServiceKey(serviceName, realm));
     }
 
-    /// <summary>移除服务值（属主校验）：键缺失 = 幂等无操作（不发通知）。</summary>
+    /// <summary>移除服务值（属主校验）：键缺失 = 幂等无操作（不发通知）。
+    /// 暂存激活时 = 撤暂存（值从未落库可见——无通知必要）。</summary>
     public void Remove(string serviceName, string realm, string ownerId)
     {
         var key = ValidateKey(serviceName, realm);
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
 
+        if (_staging.TryGetValue(ownerId, out var staged))
+        {
+            lock (staged)
+            {
+                staged.RemoveAll(e => e.Key == key);
+                return;
+            }
+        }
+
         var immediate = RemoveWithOwnerCheck(key, ownerId);
         NotifyIfPresent(immediate);
     }
+
+    /// <summary>D-7：开启属主暂存——scope 内该属主的 provide/remove 走暂存区（外部不可见）。</summary>
+    public IDisposable BeginStaging(string ownerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        if (!_staging.TryAdd(ownerId, []))
+        {
+            throw new KeystoneException(
+                ErrorCode.LifecycleInvalidState,
+                $"staging already active for owner '{ownerId}'");
+        }
+
+        return new StagingHandle(this, ownerId);
+    }
+
+    /// <summary>D-7：提交暂存——落库（属主校验）+ 单次合并通知（ACTIVE 补发等价物）。</summary>
+    public void CommitStaging(string ownerId)
+    {
+        if (!_staging.TryRemove(ownerId, out var staged))
+        {
+            return;
+        }
+
+        List<ServiceKey>? direct = [];
+        List<ServiceKey>? scoped = null;
+        foreach (var (key, value) in staged)
+        {
+            var immediate = WriteWithOwnerCheck(key, value, ownerId);
+            if (immediate is { } keys)
+            {
+                direct.AddRange(keys);
+            }
+            else
+            {
+                scoped = immediate; // null = 已并入通知 scope——提交期无 scope 则不会发生
+            }
+        }
+
+        _ = scoped;
+        if (direct.Count > 0)
+        {
+            NotifyHandlers(direct.Distinct().ToList()); // 集合语义：一次合并投递
+        }
+    }
+
+    /// <summary>D-7：弃置暂存（FAILED 路径——init 期提供的值从未可见，直接丢弃）。</summary>
+    public void DiscardStaging(string ownerId) => _staging.TryRemove(ownerId, out _);
 
     /// <summary>指定域内已注册服务名（诊断/发现投影用；无锁遍历快照语义）。</summary>
     public IReadOnlyList<string> AvailableServices(string realm)
@@ -263,6 +351,22 @@ public sealed class KeyedServiceStore
             }
 
             store.Remove(key.Name, key.Realm, ownerId);
+        }
+    }
+
+    /// <summary>D-7：暂存句柄——dispose 即提交（正常路径 ACTIVE 后调用方主动 Commit，此句柄兜底防泄漏）。</summary>
+    private sealed class StagingHandle(KeyedServiceStore store, string ownerId) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1)
+            {
+                return;
+            }
+
+            store.CommitStaging(ownerId);
         }
     }
 

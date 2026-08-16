@@ -167,7 +167,7 @@ public class DiscoveryGatingTests
         Assert.Equal(1, plugin.InitializeCount);
 
         providerFacade.RemoveOwnedServices(); // 值消失 → 依赖方卸载
-        await WaitForStateAsync(runtime, PluginLifecycleState.Disposed);
+        await WaitForStateAsync(runtime, PluginLifecycleState.Pending); // P2-13：可 re-arm 存活态（原 Disposed）
         Assert.Equal(1, plugin.DisposeCount);
 
         var providerAgain = new ContextFacade("provider2", root);

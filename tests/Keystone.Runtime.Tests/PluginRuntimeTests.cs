@@ -56,8 +56,8 @@ public class PluginRuntimeTests
         store.Remove("fs", string.Empty, "provider-x"); // 值删 → 不可用 → 依赖方卸载（ADR-0007，事件驱动异步）
 
         Assert.True(
-            await WaitUntilAsync(() => runtime.State == PluginLifecycleState.Disposed, TimeSpan.FromSeconds(2)),
-            "依赖消失后依赖方应卸载");
+            await WaitUntilAsync(() => runtime.State == PluginLifecycleState.Pending, TimeSpan.FromSeconds(2)),
+            "依赖消失后依赖方应卸载（P2-13：可 re-arm 存活 PENDING）");
         Assert.Equal(1, plugin.DisposeCount);
     }
 
