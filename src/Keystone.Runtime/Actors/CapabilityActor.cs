@@ -223,7 +223,25 @@ internal sealed partial class CapabilityActor : IActor
             envelope.ParentTaskId is { } parent ? new TaskId(parent) : null);
         try
         {
-            return await ExecuteAsync(envelope).ConfigureAwait(false);
+            var result = await ExecuteAsync(envelope).ConfigureAwait(false);
+            if (!result.Succeeded)
+            {
+                // 管道短路/失败结果（未上抛形态）→ 失败 span 标 Error
+                activity.SetStatus(
+                    System.Diagnostics.ActivityStatusCode.Error, result.ErrorDetail ?? result.ErrorCode);
+            }
+
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // 取消不标错（正常取消语义，非故障）
+        }
+        catch (Exception ex)
+        {
+            // handler 崩溃（HandlerFaultException）/中间件异常 → 失败 span 标 Error
+            activity.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
+            throw;
         }
         finally
         {

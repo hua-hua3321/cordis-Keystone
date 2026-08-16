@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
 using Keystone.Core.Contracts;
@@ -197,6 +198,59 @@ public class ActorObservabilityTests
             d.Directive == "Restart" &&
             d.Reason.Message == "supervised");
         Assert.True(restarts >= 1);
+    }
+
+    // ── span 状态面（P70-T5）──
+
+    [Fact]
+    public async Task Failed_request_marks_task_span_error_status()
+    {
+        var spans = new List<Activity>();
+        using var listener = SpanCapture(spans);
+        ActivitySource.AddActivityListener(listener);
+
+        await using var system = new Proto.ActorSystem();
+        var domain = CapabilityDomain.Attach(system, "obs");
+        var handle = domain.Spawn("t2-fail", e => Task.FromResult(Ok(e)), [new ThrowingMiddleware()]);
+        var result = await domain.RequestAsync(handle, Envelope("fail"), CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(spans, a => a.OperationName == TraceContext.ActivityName
+            && a.Status == ActivityStatusCode.Error);
+    }
+
+    [Fact]
+    public async Task Succeeded_request_leaves_task_span_without_error_status()
+    {
+        var spans = new List<Activity>();
+        using var listener = SpanCapture(spans);
+        ActivitySource.AddActivityListener(listener);
+
+        await using var system = new Proto.ActorSystem();
+        var domain = CapabilityDomain.Attach(system, "obs");
+        var handle = domain.Spawn("t2-ok", e => Task.FromResult(Ok(e)));
+        var result = await domain.RequestAsync(handle, Envelope("ok"), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Contains(spans, a => a.OperationName == TraceContext.ActivityName
+            && a.Status != ActivityStatusCode.Error);
+    }
+
+    private static ActivityListener SpanCapture(List<Activity> spans)
+    {
+        var gate = new object();
+        return new ActivityListener
+        {
+            ShouldListenTo = s => s.Name == TraceContext.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = a =>
+            {
+                lock (gate)
+                {
+                    spans.Add(a);
+                }
+            },
+        };
     }
 
     // ── 日志面 ──
