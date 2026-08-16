@@ -76,6 +76,11 @@ status: standard
 | P2-21 (LG-19/20/21) | 日志 minor | ContextFacade.cs:177-181 等 | GetLogger xmldoc 错位；配置非法值静默；缺 Dispose 断言测试 |
 | P2-22 (EV-2/4) | 模式分列注册 / waterfall 返回值 | EventBus.cs vs events.ts | Cordis 单 on+options 分模式；waterfall 返回值语义差异（已接受设计需显式标注） |
 | P2-23 (SV-11) | 门控/解析域同源脆弱耦合 | KeystoneHost.cs:1017-1019 | 同一 isolateMap 实例双注入——未来派生即分叉（观察项） |
+| P2-24 (IN-4) | FlushAsync 异常未观察 | ConfigFileWriter.cs:66-86（`_ = FlushAsync()` 丢弃） | 重试耗尽抛的 KeystoneException 成 unobserved 静默丢失（Cordis 有 logger.warn）；建议 catch 记日志或挂 OnReadOnly 式回调 |
+| P2-25 (IN-5) | CA-7 瞬态 EACCES 一次判死 | ConfigFileWriter.cs WriteCoreAsync vs include 重试 10 次 | 首错即降级 readonly（Cordis 预检+重试）；建议 0x80070005 先短退避若干次再降级 |
+| P2-26 (IN-6) | CA-6 写失败错误面 | StartFromFileAsync | initial 写失败裸 FileNotFoundException（应包 KeystoneException 语义） |
+| P2-27 (IN-7) | ConfigUpdate 事件面不一致 | KeystoneHost NotifyConfigUpdate 调用点 | 纯内存模式（无 ConfigFilePath）下 Create/Update 不触发、Remove 触发——面不齐 |
+| P2-28 (IN-8) | EntrySerializer 回写失真 | EntrySerializer.cs:74-91 | list 形状回写：重复键/无引号/塌缩——建议补序列与引号保真 |
 
 ## 5. verified 凭证（对抗验证通过，择要）
 
