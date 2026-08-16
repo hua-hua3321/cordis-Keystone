@@ -1140,6 +1140,17 @@ created: 2026-08-15
 | T4 config/host 切片 | keystone.config.apply / entry / group.transaction / hotupdate 四 span + hotupdate.operations（hot|cold）+ writer.failures 计数接线（EnsureConfigWriter OnWriteFailed → counter）；PluginLoader 暴露 CurrentConfig（hotupdate span old→new keys 素材）；逐条目 channel 分级（added/removed/disabled/structural=cold，config-changed=hot） | KeystoneHost.cs / PluginLoader.cs / TraceContext.cs（常量面） | ConfigObservabilityTests 4 例（apply/entry/group-tx span + hotupdate span + hot/cold 计数 + writer.failures） | ✔ |
 | T5 回归 + AOT + 文档 | 全量 6 套件 + AOT 冒烟 + 14/11/AGENTS 回写 | 全仓 | 483/483（Core 30 / AI 19 / Config 84 / Sdk 35 / Runtime 201 / Hosting 114）；Hosting/Runtime AOT 零 IL；frontmatter 过 | ✔ |
 
+#### W70-02 P70：观测面缺口收口批（T1-T4，ADR-0018 遗漏项复盘）
+
+> 目标：P70 落地后全量复盘，逐层核对 span/meter/事实/日志四面的实际接线与 ADR 承诺——发现 6 处遗漏，本批收口 4 处（P0/P1），2 处接受差异挂观察项（见 11 §4.1）。
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| T1 指标导出管线（P0） | ConfigureObservability 补建 MeterProvider（AddMeter + Console 默认 + OTLP 可选 + Dispose 收口）——修复前 7 指标仅进程内 MeterListener 可读，生产不可见（违背 ADR 决策 3） | KeystoneHost.cs | ObservabilityWiringTests 2 例（MeterProviderBuilt 默认 true / Enabled=false false）；484/484；Hosting AOT 零 IL | ✔ |
+| T2 task span 失败状态（P1） | keystone.task span 失败/取消标 ActivityStatusCode——修复前失败请求 span 无状态，OTel UI 显示为成功；handler 崩溃/中间件异常/管道短路标 Error，取消不标错 | CapabilityActor.cs | ActorObservabilityTests 2 例（ActivityListener 捕获：失败=Error / 成功≠Error）；486/486；Runtime AOT 零 IL | ✔ |
+| T3 ActorStoppedFact（P1） | 新增实例停止事实（ADR L2 明文承诺，与 ActorRestartedFact 对称）；Proto.Actor 的 Stopped 系统消息不送达 IActor.ReceiveAsync → 改为 CapabilityDomain 记账 spawn 实例 + DisposeAsync 落盘 | Events/ActorStoppedFact.cs（新）/ CapabilityDomain.cs | ActorObservabilityTests 1 例（域 Dispose 后事实可回放）；487/487；Runtime AOT 零 IL | ✔ |
+| T4 插件生命周期日志（P1） | PluginRuntime start/fail/stop 边界 LoggerMessage 源生成（6101-6103，category={域}/{插件ID}）——修复前生命周期只有事实无结构化日志 | PluginRuntime.cs | PluginLifecycleLoggingTests 2 例（start/stop 双日志 + init 失败 Error）；489/489；Runtime AOT 零 IL | ✔ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -1279,6 +1290,7 @@ created: 2026-08-15
 | W56-01~04 | ID-52 | `18-cordis-code-parity-audit.md`、`AGENTS.md` | 纯文档（无代码） |
 | ID-52 | 发现接口收窄；同步契约；锁内发事件隐患证实 | `docs/`（18） | W56-01~03 |
 | W70-01 | ADR-0018；05 §5 | `src/Keystone.Hosting/KeystoneHost.cs`、`src/Keystone.Runtime/Trace/`、`src/Keystone.Runtime/Actors/`、`src/Keystone.Runtime/Plugins/Loading/PluginLoader.cs` | ObservabilityWiringTests(2) + ActorObservabilityTests(5) + ConfigObservabilityTests(4) + Trace 迁移(3) |
+| W70-02 | ADR-0018；05 §5 | `src/Keystone.Hosting/KeystoneHost.cs`、`src/Keystone.Runtime/Actors/CapabilityActor.cs`、`src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`src/Keystone.Runtime/Events/ActorStoppedFact.cs`、`src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | ObservabilityWiringTests(+2) + ActorObservabilityTests(+3) + PluginLifecycleLoggingTests(2) |
 
 ## 9. 维护规则
 

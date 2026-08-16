@@ -142,6 +142,8 @@ created: 2026-08-15
 | 观察点 | 触发条件 | 备选方案（届时评估） |
 |--------|---------|---------------------|
 | `_applyingConfig` 自旋等待（10ms 轮询）在并发 CRUD 下的延迟/饿死 | 高并发编程式 CRUD（管理面 API 高频调用 + watcher 回环叠加）出现可观测延迟或饥饿 | 改 `Channel<Func<Task>>` 单消费泵（任务级串行，对齐 Cordis applyQueue enqueue 粒度） |
+| AI/MCP 层无 Keystone 级 span/指标（P70-T5 接受差异） | MCP 桥接入 actor/task 链路、需按 TaskId 关联 MCP 请求时 | 在 McpClientBridge/McpServerBridge 请求/响应边界加 span（task 关联 tag）+ meter；当前组合官方 SDK 最小层，SDK 自带 ILoggerFactory 日志 |
+| 配置写回成功路径/事件总线 emit/持久化（FileEventStore append、FactRetentionScheduler Prune）无观测（P70-T5 接受差异） | 写回防抖延迟排查、事件分发/归档失败归因成为高频痛点时 | 写回成功 span + Emit 计数 + 持久化 LoggerMessage 日志（失败面已有 writer.failures） |
 
 ## 5. 跟踪纪律
 
