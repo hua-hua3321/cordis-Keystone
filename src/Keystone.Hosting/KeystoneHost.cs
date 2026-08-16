@@ -526,7 +526,9 @@ public sealed class KeystoneHost : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(manifest);
 
         var loader = await PluginLoader.CreateAsync(
-            source, manifest, _discovery, id => new ContextFacade(id, _rootContext)).ConfigureAwait(false);
+            source, manifest, _discovery, id => new ContextFacade(id, _rootContext),
+            quiesceTimeout: _options.FrameworkSettings.QuiesceTimeout,
+            dependencyTimeout: _options.FrameworkSettings.DependencyWaitTimeout).ConfigureAwait(false);
         _plugins.Add(new HostedPlugin(manifest.Id, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(new EntryOptions { Id = manifest.Id, Name = source.Id }));
     }
@@ -562,7 +564,9 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         var isolateMap = BuildIsolateMap(id);
         var loader = await PluginLoader.CreateAsync(
-            source, manifest, _discovery, ctxId => new ContextFacade(ctxId, _rootContext, isolateMap: isolateMap), config, isolateMap).ConfigureAwait(false);
+            source, manifest, _discovery, ctxId => new ContextFacade(ctxId, _rootContext, isolateMap: isolateMap), config, isolateMap,
+            quiesceTimeout: _options.FrameworkSettings.QuiesceTimeout,
+            dependencyTimeout: _options.FrameworkSettings.DependencyWaitTimeout).ConfigureAwait(false);
 
         _plugins.Add(new HostedPlugin(id, loader));
         // P70-T4（ADR-0018 L1）：冷重启计数（重编译 + 换 ALC 通道）
@@ -1394,7 +1398,9 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         var isolateMap = BuildIsolateMap(entry.Id!);
         var loader = await PluginLoader.CreateAsync(
-            source, manifest, _discovery, id => new ContextFacade(id, _rootContext, isolateMap: isolateMap), config, isolateMap).ConfigureAwait(false);
+            source, manifest, _discovery, id => new ContextFacade(id, _rootContext, isolateMap: isolateMap), config, isolateMap,
+            quiesceTimeout: _options.FrameworkSettings.QuiesceTimeout,
+            dependencyTimeout: _options.FrameworkSettings.DependencyWaitTimeout).ConfigureAwait(false);
         _plugins.Add(new HostedPlugin(entry.Id!, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(entry)); // 统一加载入口（F9）
     }

@@ -11,6 +11,11 @@ public sealed class KeystoneHostOptions
     /// <summary>观测性（P70/ADR-0018 L3：Console 默认开 / OTLP 可选 / 采样率 / 慢请求阈值）。</summary>
     public ObservabilityOptions Observability { get; set; } = new();
 
+    /// <summary>框架级可调值（P71-T1 硬编码审计：DependencyWaitTimeout/QuiesceTimeout 贯穿到
+    /// PluginRuntime）。嵌入方可直接赋值，或经 <c>KeystoneSettings.Bind(configuration)</c>
+    /// 从 keystone 配置节绑定后赋值（ADR-0013：配置存在时以配置为准）。</summary>
+    public Keystone.Core.KeystoneSettings FrameworkSettings { get; set; } = new();
+
     /// <summary>条目 → manifest（provides/inject 服务声明）。</summary>
     public Func<EntryOptions, PluginManifest> ManifestProvider { get; set; } =
         _ => throw new InvalidOperationException("ManifestProvider is not configured");

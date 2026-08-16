@@ -27,18 +27,27 @@ public sealed class PluginLoader : IAsyncDisposable
     private IReadOnlyDictionary<string, object?> _config; // D-1：原地通道可更新（去 readonly）
     private readonly IReadOnlyDictionary<string, string>? _isolateMap;
 
+    /// <summary>P71-T1（框架超时贯穿）：宿主 FrameworkSettings 下传——null = Core 默认（30s/10s）。
+    /// 原地热更（UpdateConfigAsync）重建 runtime 时保持同值。</summary>
+    private readonly TimeSpan? _quiesceTimeout;
+    private readonly TimeSpan? _dependencyTimeout;
+
     private PluginLoader(
         PluginManifest manifest,
         IServiceDiscovery discovery,
         Func<string, IPluginContext> contextFactory,
         IReadOnlyDictionary<string, object?>? config = null,
-        IReadOnlyDictionary<string, string>? isolateMap = null)
+        IReadOnlyDictionary<string, string>? isolateMap = null,
+        TimeSpan? quiesceTimeout = null,
+        TimeSpan? dependencyTimeout = null)
     {
         _manifest = manifest;
         _discovery = discovery;
         _contextFactory = contextFactory;
         _config = config ?? new Dictionary<string, object?>(StringComparer.Ordinal);
         _isolateMap = isolateMap;
+        _quiesceTimeout = quiesceTimeout;
+        _dependencyTimeout = dependencyTimeout;
     }
 
     /// <summary>当前插件运行时（ACTIVE 后可用）。</summary>
@@ -57,14 +66,17 @@ public sealed class PluginLoader : IAsyncDisposable
         IServiceDiscovery discovery,
         Func<string, IPluginContext> contextFactory,
         IReadOnlyDictionary<string, object?>? config = null,
-        IReadOnlyDictionary<string, string>? isolateMap = null)
+        IReadOnlyDictionary<string, string>? isolateMap = null,
+        TimeSpan? quiesceTimeout = null,
+        TimeSpan? dependencyTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(discovery);
         ArgumentNullException.ThrowIfNull(contextFactory);
 
-        var loader = new PluginLoader(manifest, discovery, contextFactory, config, isolateMap);
+        var loader = new PluginLoader(
+            manifest, discovery, contextFactory, config, isolateMap, quiesceTimeout, dependencyTimeout);
         await loader.LoadSourceAsync(source).ConfigureAwait(false);
         return loader;
     }
@@ -102,7 +114,8 @@ public sealed class PluginLoader : IAsyncDisposable
             ?? throw new KeystoneException(
                 ErrorCode.LifecycleLoadFailed,
                 $"plugin '{_manifest.Id}' could not be instantiated in place");
-        _runtime = new PluginRuntime(_manifest, _ => plugin, _discovery, _contextFactory, _isolateMap, _config);
+        _runtime = new PluginRuntime(
+            _manifest, _ => plugin, _discovery, _contextFactory, _isolateMap, _config, _quiesceTimeout, _dependencyTimeout);
         await _runtime.StartAsync().ConfigureAwait(false);
     }
 
@@ -201,7 +214,8 @@ public sealed class PluginLoader : IAsyncDisposable
             ?? throw new KeystoneException(ErrorCode.LifecycleLoadFailed, $"plugin '{source.Id}' could not be instantiated");
 
         _alc = alc;
-        _runtime = new PluginRuntime(_manifest, _ => plugin, _discovery, _contextFactory, _isolateMap, _config);
+        _runtime = new PluginRuntime(
+            _manifest, _ => plugin, _discovery, _contextFactory, _isolateMap, _config, _quiesceTimeout, _dependencyTimeout);
         await _runtime.StartAsync().ConfigureAwait(false);
     }
 }
