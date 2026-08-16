@@ -29,23 +29,23 @@ hot reload, and a middleware-pipeline execution model.
 
 ## 当前状态
 
-**实现期完成（M0-M13 全部通过，500 测试全绿）**：Keystone 框架 1.0 可运行——核心（契约/上下文/事件/生命周期/管道/加载/配置/管理层/能力域/观测/持久化/SDK/AI 组合）十三阶段全部落地，全工程 AOT 零 IL 警告（Proto.Actor/MAF 例外按 ADR-0015 记录）。本仓库是方案与实现进度的唯一真源（Single Source of Truth）。
+**实现期完成（M0-M13 全部通过）+ 三轮 Cordis 等价性审计收敛（P14-P72，500 测试全绿）**：Keystone 框架 1.0 可运行——核心（契约/上下文/事件/生命周期/管道/加载/配置/管理层/能力域/观测/持久化/SDK/AI 组合）十三阶段全部落地；此后经实现后功能复核（16 号）、代码级对照审计（18 号）、第二轮等价性复核（19 号，54 项登记 P64-P69 六批全部收敛）+ 观测性专项（ADR-0018）+ 硬编码审计（P71）+ 配置动态语义（P72），**Cordis 核心框架语义已代码级对齐**（少数机制显式弃用/接受差异，见 docs/architecture/11-gap-register.md）。全工程 AOT 零 IL 警告（Proto.Actor/MAF 例外按 ADR-0015 记录）。本仓库是方案与实现进度的唯一真源（Single Source of Truth）。
 
 ## 项目定位
 
 - **通用地基**：任何 C# 应用（web/服务/桌面/嵌入式宿主）可把 Keystone 作为插件底层嵌入；不绑定任何具体业务领域
 - **不重造**：DI（IServiceProvider）、中间件管道（ASP.NET Core 形状）、配置（IOptions + M.E.C 提供者抽象）、日志（ILogger）、后台服务（IHostedService）、**AI 底层（LLM 适配/技能包/MCP/agent 编排——组合微软官方 MAF/MCP，ADR-0008）**
-- **只实现框架独有的部分**：ALC 插件加载层、按插件 ID 分组的注册回收、管道配置 schema、插件 SDK
+- **只实现框架独有的部分**：ALC 插件加载层、按插件 ID 分组的注册回收、中间件管道组合（Spawn/SwapPipeline）、插件 SDK
 - **配置解绑**：配置来源不锁死——提供者抽象（ADR-0013），默认本地 YAML（开发阶段，ADR-0014），AgileConfig 配置中心为预留可选源，用户可自实现任意来源；禁止硬编码（框架可调值一律走配置）
 
 ## 核心机制
 
 | 机制 | 说明 | 文档 |
 |------|------|------|
-| 插件热重载 | Roslyn 内存编译 + 私有 Collectible ALC + quiesce 收敛闸门 | [02-plugin-model.md](docs/architecture/02-plugin-model.md)、ADR-0005 |
+| 插件热重载 | Roslyn 内存编译 + 私有 Collectible ALC + quiesce 收敛闸门；仅配置变化走同 ALC 原地热更新（ADR-0017） | [02-plugin-model.md](docs/architecture/02-plugin-model.md)、ADR-0005/0017 |
 | 依赖门控激活 | manifest `inject` 服务级依赖，PENDING 等待依赖就绪 | ADR-0007 |
 | 事件分发 | emit / parallel / serial / bail / waterfall 五种模式 | ADR-0006 |
-| 多实例隔离 | 独立 context + 子容器 + 服务级 isolate | [03-context.md](docs/architecture/03-context.md) |
+| 多实例隔离 | 独立 context + 共享键控服务存储（键 = (服务名, realm)，isolate 两档域） | [03-context.md](docs/architecture/03-context.md) |
 | 配置提供者抽象 | M.E.C `IConfigurationSource` 契约 + 默认本地 YAML（AOT 安全 YamlStream 解析）；AgileConfig 配置中心预留可选源 | ADR-0013/0014、[08-configuration-layer.md](docs/architecture/08-configuration-layer.md) |
 | AI 能力域组合 | 组合微软官方 MAF/MCP（SEP-2640 技能包、MCP 双端、Workflows 编排），单向依赖，核心不依赖 | ADR-0008 |
 

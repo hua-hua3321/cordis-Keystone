@@ -13,13 +13,12 @@
 
 ### 新增
 
-- **三层架构**：配置层、管理层（`KeystoneHost` / `CompositionRoot` actor）、
-  能力域 actor。
+- **三层架构**：配置层、管理层（`KeystoneHost` 宿主组合根）与能力域 actor。
 - **插件模型**：文件式（.NET 10 文件级应用）与预编译 DLL 插件，经 Roslyn
   内存编译进私有可卸载 `AssemblyLoadContext`（ALC）。
 - **生命周期与热重载**：`IPlugin` 契约、依赖门控激活（依赖就绪前保持
   `PENDING`）、真正的原地热更新（仅配置变化，ADR-0017）以及冷重启。
-- **中间件管道**：`IMiddleware`，`await next()` 的 waterfall 语义与短路支持。
+- **中间件管道**：`IMiddleware`，`await next(ctx)` 的 waterfall 语义与短路支持。
 - **事件系统**：五种分发模式——`emit`、`parallel`、`serial`、`bail`、
   `waterfall`（ADR-0006）。
 - **服务模型**：键控服务存储 + realm 隔离（`Provide` / `Get` / `Set`），

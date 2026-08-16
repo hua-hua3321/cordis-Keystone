@@ -15,14 +15,14 @@ for .NET.
 ### Added
 
 - **Three-layer architecture**: configuration layer, management layer
-  (`KeystoneHost` / `CompositionRoot` actor), and capability-domain actors.
+  (`KeystoneHost`, the host composition root) and capability-domain actors.
 - **Plugin model**: file-based (.NET 10 file-scoped apps) and precompiled DLL
   plugins, loaded via Roslyn in-memory compilation into a collectible
   `AssemblyLoadContext` (ALC).
 - **Lifecycle & hot reload**: `IPlugin` contract, dependency-gated activation
   (PENDING until dependencies are ready), and true hot update (config-only
   in-place swap, ADR-0017) plus cold reload.
-- **Middleware pipeline**: `IMiddleware` with `await next()` waterfall semantics
+- **Middleware pipeline**: `IMiddleware` with `await next(ctx)` waterfall semantics
   and short-circuit support.
 - **Event system**: five dispatch modes — `emit`, `parallel`, `serial`, `bail`,
   `waterfall` (ADR-0006).

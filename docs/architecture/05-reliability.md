@@ -35,7 +35,7 @@ created: 2026-08-15
 - OneForOne（默认）：子 actor 崩溃只重启该 actor
 - AllForOne：需要一致性时，一损俱损
 
-管理层（CompositionRoot）监督能力域 actor：
+管理层（宿主组合根 KeystoneHost）经 `CapabilityDomain` 监督能力域 actor：
 - 崩溃 → 按策略重启（保留 context 状态 or 重建）
 - 重启计数 → 连续失败 N 次 → 标记不可用，告警
 
@@ -50,12 +50,18 @@ created: 2026-08-15
 
 CancellationToken 贯穿全链（接口第一版就带 token，后期加是破坏性变更）。
 
+> **实现备注（2026-08-16，按代码核对）**：本表为设计期目标面，实际接线分两层——
+> **已接入运行链**：依赖等待超时（`PluginRuntime`，`KeystoneSettings.DependencyWaitTimeout`，超时 → FAILED + 可 re-arm）、quiesce 收敛超时（`QuiesceTimeout`）、进程关闭超时（`ShutdownTimeout` + 未收敛审计）、慢请求观测阈值（`ObservabilityOptions`）。
+> **策略原语已实现、宿主链未默认接线（预留）**：`TimeoutPolicy` / `CircuitBreaker`（`Runtime/Reliability/`，`ReliabilityTests` 单测覆盖）——嵌入方可显式组合到自己的 handler/中间件；接入宿主默认链需 ADR（登记 11 §3 N7）。上表"管道节点超时/插件初始化超时/LLM 调用重试"即属该预留面。
+
 ## 4. 重试与幂等
 
 - 重试策略：指数退避 + 抖动
 - **幂等性**：多实例跑同一任务，重试不得重复执行副作用
   - 副作用操作（写库/发消息）必须幂等（任务 ID 去重）
   - 这是"多实例跑不同任务"模型的正确性前提
+
+> **实现备注（2026-08-16，按代码核对）**：`RetryPolicy`（指数退避 + 抖动）为已实现原语（单测覆盖），宿主链未默认接线（同 §3 预留面，11 §3 N7）；**已接线**的幂等面 = 能力域 TaskId 结果缓存去重（DC-13，`ResultCacheCapacity` 可配）。
 
 ## 5. 可观测性
 
@@ -109,5 +115,5 @@ CancellationToken 贯穿全链（接口第一版就带 token，后期加是破�
 
 原待定两项已收敛为决策（实现期不再悬空）：
 
-- **回滚语义（已决：默认不回滚）**：管道节点失败 → 错误中间件短路返回（§1），**不做自动回滚**；事务边界由插件显式声明——插件需要补偿时实现宿主提供的补偿接口（如 `ITransactional`，在管道入口声明参与事务），宿主按声明顺序执行补偿。理由：自动回滚对"只读/幂等副作用"是纯开销，事务场景是少数显式声明更清晰。
-- **重试幂等键（已决：TaskId 默认，插件级扩展可选）**：默认 TaskId 即幂等键（06-contracts §4）；插件级幂等键（业务自然键）作为显式扩展——插件可实现 `IIdempotencyKeyProvider` 提供业务键，宿主在重试去重时优先使用。第一版仅实现 TaskId 去重，插件级键留接口不进默认实现。
+- **回滚语义（已决：默认不回滚）**：管道节点失败 → 错误中间件短路返回（§1），**不做自动回滚**；事务边界由插件显式声明——插件需要补偿时实现宿主提供的补偿接口（如 `ITransactional`，在管道入口声明参与事务），宿主按声明顺序执行补偿。理由：自动回滚对"只读/幂等副作用"是纯开销，事务场景是少数显式声明更清晰。**注（2026-08-16）：`ITransactional` 为预留设计、未实现**——现状等价面 = 配置层 diff 事务（`ApplyDiffTransactionallyAsync`：逐条目聚合失败 + 逆序回滚，P59/P64）+ 管道短路；插件级补偿接口待真实事务场景出现再引入（登记 11 §4）。
+- **重试幂等键（已决：TaskId 默认，插件级扩展可选）**：默认 TaskId 即幂等键（06-contracts §4）；插件级幂等键（业务自然键）作为显式扩展——插件可实现 `IIdempotencyKeyProvider` 提供业务键，宿主在重试去重时优先使用。第一版仅实现 TaskId 去重，插件级键留接口不进默认实现。**注（2026-08-16）：`IIdempotencyKeyProvider` 同为预留设计、未实现**——当前唯一幂等面 = TaskId 结果缓存去重（DC-13）；业务幂等键接口待需求出现再引入（登记 11 §4）。

@@ -30,7 +30,7 @@ created: 2026-08-15
 ## 项目定位
 
 Keystone 通用地基插件框架：配置驱动、多实例隔离、热重载、中间件管道式的插件执行模型；任何 C# 应用可嵌入，不绑定业务领域。
-不重造 DI/中间件/配置等 .NET 已提供的能力，只实现框架独有的部分（ALC 插件加载、按插件 ID 分组回收、管道配置 schema、插件 SDK）。
+不重造 DI/中间件/配置等 .NET 已提供的能力，只实现框架独有的部分（ALC 插件加载、按插件 ID 分组回收、中间件管道组合（Spawn/SwapPipeline）、插件 SDK）。
 配置来源解绑（ADR-0013）：提供者抽象 + 默认本地 YAML（开发阶段，ADR-0014；AgileConfig 配置中心为预留可选源），用户可自实现；禁止硬编码，框架可调值一律走配置。
 AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP，不重造（ADR-0008）。
 
@@ -38,27 +38,27 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 
 | 文档 | 内容 | 状态 |
 |------|------|------|
-| [architecture/00-tech-stack.md](architecture/00-tech-stack.md) | 技术体系：技术基线（.NET 10 + C# 14）+ 已确认技术栈清单（Proto.Actor 1.8 等） | 标准 |
-| [architecture/01-overview.md](architecture/01-overview.md) | 方案总览：三层架构（配置层/管理层/能力域 actor） | 标准 |
-| [architecture/02-plugin-model.md](architecture/02-plugin-model.md) | 插件模型：接口白名单、键控服务、子容器、热重载 | 标准 |
-| [architecture/03-context.md](architecture/03-context.md) | Context 设计：作用域链、状态外置、事件分层 | 标准 |
-| [architecture/04-pipeline.md](architecture/04-pipeline.md) | 管道设计：中间件模式、waterfall 语义、双轨事件 | 标准 |
-| [architecture/05-reliability.md](architecture/05-reliability.md) | 可靠性：错误处理、监督策略、超时熔断、可观测性 | 标准 |
-| [architecture/06-contracts.md](architecture/06-contracts.md) | 消息契约：请求模型、请求 ID、链路追踪 | 标准 |
-| [architecture/07-cordis-migration-gap.md](architecture/07-cordis-migration-gap.md) | Cordis 迁移差距：7 必查项结论 + 差距清单/优先级/影响 | 标准 |
-| [architecture/08-configuration-layer.md](architecture/08-configuration-layer.md) | 配置层：配置形态、条目模型、分层叠加、schema 校验、热更新触发 | 标准 |
-| [architecture/09-management-layer.md](architecture/09-management-layer.md) | 管理层：启动流程、监督接线、进程级优雅关闭 | 标准 |
-| [architecture/10-plugin-sdk.md](architecture/10-plugin-sdk.md) | 插件 SDK：接口面、配置注入、计时器、manifest schema、模板工程 | 标准 |
-| [architecture/11-gap-register.md](architecture/11-gap-register.md) | 差距跟踪表：G1-G16 + 补充排查项的处理状态矩阵（07 是快照，本文是现状） | 标准 |
-| [architecture/12-cordis-semantics-mapping.md](architecture/12-cordis-semantics-mapping.md) | 语义映射参考：被弃用/未解析 Cordis 机制（intercept/check、H/M/L/F 系列）的 C# 对应物字典 + 导出面穷举审计凭证 | 标准 |
-| [architecture/13-implementation-plan.md](architecture/13-implementation-plan.md) | 分阶段实施计划：M0-M13 里程碑、每阶段目标/验收条件/DoD、待定项分配 | 标准 |
-| [architecture/14-implementation-log.md](architecture/14-implementation-log.md) | 实施记录：工作日志/实现期决策/偏差/验收台账/三向回溯索引（与 13 配套） | 标准 |
-| [architecture/15-decoupling-plan.md](architecture/15-decoupling-plan.md) | 解耦工作计划：第三方依赖耦合审计（C1-C8）+ 分阶段隔离计划（D1-D5） | 标准 |
-| [architecture/16-cordis-gap-review.md](architecture/16-cordis-gap-review.md) | Cordis 功能差距复核（实现后）：G-C1~C14 差距清单（配置注入/依赖恢复/值注销等）+ 建议计划 | 标准 |
-| [architecture/17-doc-compliance-audit.md](architecture/17-doc-compliance-audit.md) | 文档要求 vs 实现达成度审计：30 项差距（DC-1~20）+ 修复计划 | 标准 |
-| [architecture/18-cordis-code-parity-audit.md](architecture/18-cordis-code-parity-audit.md) | 实现后代码级对照审计：CA-1~18 差距 + 实现提案（已全部收敛：11 实施 + ADR-0016 弃用 + 接受差异注记） | 标准 |
-| [architecture/19-second-parity-verification-audit.md](architecture/19-second-parity-verification-audit.md) | 第二轮实现后等价性复核：P0-P2/D 系列发现（108 项，P57-P63 实施后全量再对照） | 标准 |
-| [decisions/](decisions/README.md) | 决策记录（ADR-0001 ~ 0018，设计期已收敛；实现期新决策走 14 §4 通道 + ADR-0017/0018） | accepted |
+| [architecture/00-tech-stack.md](docs/architecture/00-tech-stack.md) | 技术体系：技术基线（.NET 10 + C# 14）+ 已确认技术栈清单（Proto.Actor 1.8 等） | 标准 |
+| [architecture/01-overview.md](docs/architecture/01-overview.md) | 方案总览：三层架构（配置层/管理层/能力域 actor） | 标准 |
+| [architecture/02-plugin-model.md](docs/architecture/02-plugin-model.md) | 插件模型：接口白名单、键控服务存储（realm 键）、热重载 | 标准 |
+| [architecture/03-context.md](docs/architecture/03-context.md) | Context 设计：作用域链、状态外置、事件分层 | 标准 |
+| [architecture/04-pipeline.md](docs/architecture/04-pipeline.md) | 管道设计：中间件模式、waterfall 语义、双轨事件 | 标准 |
+| [architecture/05-reliability.md](docs/architecture/05-reliability.md) | 可靠性：错误处理、监督策略、超时熔断、可观测性 | 标准 |
+| [architecture/06-contracts.md](docs/architecture/06-contracts.md) | 消息契约：请求模型、请求 ID、链路追踪 | 标准 |
+| [architecture/07-cordis-migration-gap.md](docs/architecture/07-cordis-migration-gap.md) | Cordis 迁移差距：7 必查项结论 + 差距清单/优先级/影响 | 标准 |
+| [architecture/08-configuration-layer.md](docs/architecture/08-configuration-layer.md) | 配置层：配置形态、条目模型、分层叠加、schema 校验、热更新触发 | 标准 |
+| [architecture/09-management-layer.md](docs/architecture/09-management-layer.md) | 管理层：启动流程、监督接线、进程级优雅关闭 | 标准 |
+| [architecture/10-plugin-sdk.md](docs/architecture/10-plugin-sdk.md) | 插件 SDK：接口面、配置注入、计时器、manifest schema、模板工程 | 标准 |
+| [architecture/11-gap-register.md](docs/architecture/11-gap-register.md) | 差距跟踪表：G1-G16 + 补充排查项的处理状态矩阵（07 是快照，本文是现状） | 标准 |
+| [architecture/12-cordis-semantics-mapping.md](docs/architecture/12-cordis-semantics-mapping.md) | 语义映射参考：被弃用/未解析 Cordis 机制（intercept/check、H/M/L/F 系列）的 C# 对应物字典 + 导出面穷举审计凭证 | 标准 |
+| [architecture/13-implementation-plan.md](docs/architecture/13-implementation-plan.md) | 分阶段实施计划：M0-M13 里程碑、每阶段目标/验收条件/DoD、待定项分配 | 标准 |
+| [architecture/14-implementation-log.md](docs/architecture/14-implementation-log.md) | 实施记录：工作日志/实现期决策/偏差/验收台账/三向回溯索引（与 13 配套） | 标准 |
+| [architecture/15-decoupling-plan.md](docs/architecture/15-decoupling-plan.md) | 解耦工作计划：第三方依赖耦合审计（C1-C8）+ 分阶段隔离计划（D1-D5） | 标准 |
+| [architecture/16-cordis-gap-review.md](docs/architecture/16-cordis-gap-review.md) | Cordis 功能差距复核（实现后）：G-C1~C14 差距清单（配置注入/依赖恢复/值注销等）+ 建议计划 | 标准 |
+| [architecture/17-doc-compliance-audit.md](docs/architecture/17-doc-compliance-audit.md) | 文档要求 vs 实现达成度审计：30 项差距（DC-1~20）+ 修复计划 | 标准 |
+| [architecture/18-cordis-code-parity-audit.md](docs/architecture/18-cordis-code-parity-audit.md) | 实现后代码级对照审计：CA-1~18 差距 + 实现提案（已全部收敛：11 实施 + ADR-0016 弃用 + 接受差异注记） | 标准 |
+| [architecture/19-second-parity-verification-audit.md](docs/architecture/19-second-parity-verification-audit.md) | 第二轮实现后等价性复核：P0-P2/D 系列发现（54 项登记，P57-P63 实施后全量再对照） | 标准 |
+| [decisions/](docs/decisions/README.md) | 决策记录（ADR-0001 ~ 0018，设计期已收敛；实现期新决策走 14 §4 通道 + ADR-0017/0018） | accepted |
 | [docs/tutorials/](docs/tutorials/) | 开源中英文教程（快速上手：嵌入宿主/编写插件/中间件/事件/配置/热重载） | 标准 |
 | 开源治理（README(.md/.en.md) / LICENSE / CONTRIBUTING(.md/.en.md) / CODE_OF_CONDUCT(.md/.en.md) / SECURITY(.md/.en.md) / CHANGELOG(.md/.en.md) / SUPPORT(.md/.en.md) / CODEOWNERS） | 社区与贡献约定、行为准则、安全披露、更新日志（中英文双语） | 标准 |
 
@@ -70,7 +70,7 @@ AI 底层（LLM 适配/技能包/MCP/agent 编排）组合微软官方 MAF/MCP�
 
 ## 加工件说明（看板流水线使用）
 
-当前阶段：**实现期完成（M0-M13 全部通过）+ P14 MCP 协议层落地 + P15-P20 解耦完成 + P21 集成验收 + P22 接入 B3/B4 + P23-P32 Cordis 差距 9 项闭合 + P33 宿主级多实例集成 + P34-P37 文档达标 P0 高危 5 项（DC-1 持久 context / DC-3 quiesce / DC-6 rebind / DC-5 依赖超时 / DC-4 监督）+ P38-P50 静态插值/事实事件/管道 swap/分层叠加/disabled 挂起/日志命名/Trace 幂等/CRUD 落盘/manifest 校验/事件保留/获取端抽象/取消贯穿/文件热重载（DC-8/11/10/7/16/20/13/15/17/18/19/14/9，334 测试全绿）；**17 审计 30 项差距全部闭合（P0+P1+P2）+ P51-P53 第二轮代码级对照审计 + 逐项研判 + 决策批判复核 + P54-P56 CA-1 全决策裁定与可行性复核（默认域=共享 / schema=对齐 Cordis map 两档 / 抽象接缝=发现层"只读+通知"；CA-1 已实施完成 P57：T1 schema / T2 KeyedServiceStore / T3 facade 接线 / T4 发现投影+门控统一 / T5 宿主端到端+F10 / T6 总验收；P58 CA-10 组级联（唯一 P0）+ P59 CA-3 组级事务/CA-4 组合 update + P60 CA-6 initial 引导/CA-12 服务级选项 + P61 P2 批（CA-9 竞态/CA-7 readonly/CA-15 noSave/CA-5 patch）+ P62 CA-2 插件源 watcher，413 测试全绿；18 审计可实施项全部落地，CA-8 弃用（ADR-0016）/CA-11 保留扩展点/CA-13 场景驱动延后/CA-14/16/17/18 接受差异已注记——18 审计 18 项全部收敛；P64 第二轮全量等价性复核（19 号文档，116 项发现）+ 总裁定（全部语义按 Cordis 对齐，19 §8）+ P64 事务与生命周期正确性批落地（P0-1/2/3 事务三连 + P0-6 订阅回收 + P0-7 计时器收口 + D-4/5/9）+ P65 配置管线批落地（P0-4 watcher 同管线 + P0-5 写串行化 + P1-6 disabled 级联 + P1-7 形状/归属结构键 + P2-1/2/9，P0 七项全部闭合）+ P66 状态机与门控批落地（P1-1..5 五竞态 + D-7 门控 ACTIVE 暂存 + P2-13 PENDING re-arm + P2-14 root effects + P2-16 属主校验，438 测试全绿，P1 七项全部闭合）+ P67 API 语义对齐批落地（D-2 字段合并 + D-3 parent 缺省不动 + D-8 事件广播缺省 + P2-6/7/8 嵌套 id/ensureId/精确回滚 + P2-18 文档修正，447 测试全绿）+ P68 服务语义与机械收尾批落地（D-6 Provide 报错式+Set + P2-5 结构键统一 + P2-27 通知面 + P2-24/25/26 写回加固 + P2-28 序列化保真 + P2-29 fire-and-forget + P2-19/21/LD-5 + 管道异常回填与监督观测面修正——actor 边界异常不再吞进永不完成的 future，465 测试全绿）+ P69 真热更新批落地（D-1/LD-6，ADR-0017：config-only 原地通道——同 ALC 新实例，不重编译不碰源码，源坏热更不受影响；冷路径分级不变，469 测试全绿——**19 号审计 116 项发现全部收敛，P64-P69 六批实施完毕**）+ P70 观测性专项落地（ADR-0018：OTel 骨架三层——L1 探针纯 BCL / L2 事实复用 EventStore / L3 导出仅 Hosting；TraceContext→ActivitySource + L3 组合接线 + actor 边界日志/指标/监督 + config/host 四 span（apply/entry/group-tx/hotupdate）+ hotupdate.operations（hot|cold）/writer.failures 计数，483 测试全绿——消息排错从人工二分变按 TaskId 一查到底）+ P70 观测面缺口收口批落地（ADR-0018 遗漏项复盘：T1 指标导出管线 MeterProvider / T2 task span 失败标 Error / T3 ActorStoppedFact / T4 插件生命周期结构化日志，489 测试全绿——AI/MCP 追踪与写回/事件/持久化观测挂 11 §4.1 观察项）+ P71 硬编码审计批落地（配置合规复盘：FrameworkSettings 断线修复——DependencyWaitTimeout/QuiesceTimeout 真正可配（宿主→loader→runtime 贯穿），删 3 个死字段；7 处硬编码可调值入配置面（watcher 防抖/写回重试与防抖/结果缓存容量，默认不变），497 测试全绿）+ P72 配置动态语义批落地（Cordis fiber.update 对齐：未托管条目配置修复 re-arm + 框架配置启动冻结契约 ID-50，500 测试全绿））**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
+当前阶段：**实现期完成（M0-M13 全部通过）+ P14 MCP 协议层落地 + P15-P20 解耦完成 + P21 集成验收 + P22 接入 B3/B4 + P23-P32 Cordis 差距 9 项闭合 + P33 宿主级多实例集成 + P34-P37 文档达标 P0 高危 5 项（DC-1 持久 context / DC-3 quiesce / DC-6 rebind / DC-5 依赖超时 / DC-4 监督）+ P38-P50 静态插值/事实事件/管道 swap/分层叠加/disabled 挂起/日志命名/Trace 幂等/CRUD 落盘/manifest 校验/事件保留/获取端抽象/取消贯穿/文件热重载（DC-8/11/10/7/16/20/13/15/17/18/19/14/9，334 测试全绿）；**17 审计 30 项差距全部闭合（P0+P1+P2）+ P51-P53 第二轮代码级对照审计 + 逐项研判 + 决策批判复核 + P54-P56 CA-1 全决策裁定与可行性复核（默认域=共享 / schema=对齐 Cordis map 两档 / 抽象接缝=发现层"只读+通知"；CA-1 已实施完成 P57：T1 schema / T2 KeyedServiceStore / T3 facade 接线 / T4 发现投影+门控统一 / T5 宿主端到端+F10 / T6 总验收；P58 CA-10 组级联（唯一 P0）+ P59 CA-3 组级事务/CA-4 组合 update + P60 CA-6 initial 引导/CA-12 服务级选项 + P61 P2 批（CA-9 竞态/CA-7 readonly/CA-15 noSave/CA-5 patch）+ P62 CA-2 插件源 watcher，413 测试全绿；18 审计可实施项全部落地，CA-8 弃用（ADR-0016）/CA-11 保留扩展点/CA-13 场景驱动延后/CA-14/16/17/18 接受差异已注记——18 审计 18 项全部收敛；P64 第二轮全量等价性复核（19 号文档，54 项登记——口径见 19 §0）+ 总裁定（全部语义按 Cordis 对齐，19 §8）+ P64 事务与生命周期正确性批落地（P0-1/2/3 事务三连 + P0-6 订阅回收 + P0-7 计时器收口 + D-4/5/9）+ P65 配置管线批落地（P0-4 watcher 同管线 + P0-5 写串行化 + P1-6 disabled 级联 + P1-7 形状/归属结构键 + P2-1/2/9，P0 七项全部闭合）+ P66 状态机与门控批落地（P1-1..5 五竞态 + D-7 门控 ACTIVE 暂存 + P2-13 PENDING re-arm + P2-14 root effects + P2-16 属主校验，438 测试全绿，P1 七项全部闭合）+ P67 API 语义对齐批落地（D-2 字段合并 + D-3 parent 缺省不动 + D-8 事件广播缺省 + P2-6/7/8 嵌套 id/ensureId/精确回滚 + P2-18 文档修正，447 测试全绿）+ P68 服务语义与机械收尾批落地（D-6 Provide 报错式+Set + P2-5 结构键统一 + P2-27 通知面 + P2-24/25/26 写回加固 + P2-28 序列化保真 + P2-29 fire-and-forget + P2-19/21/LD-5 + 管道异常回填与监督观测面修正——actor 边界异常不再吞进永不完成的 future，465 测试全绿）+ P69 真热更新批落地（D-1/LD-6，ADR-0017：config-only 原地通道——同 ALC 新实例，不重编译不碰源码，源坏热更不受影响；冷路径分级不变，469 测试全绿——**19 号审计 54 项登记全部收敛，P64-P69 六批实施完毕**）+ P70 观测性专项落地（ADR-0018：OTel 骨架三层——L1 探针纯 BCL / L2 事实复用 EventStore / L3 导出仅 Hosting；TraceContext→ActivitySource + L3 组合接线 + actor 边界日志/指标/监督 + config/host 四 span（apply/entry/group-tx/hotupdate）+ hotupdate.operations（hot|cold）/writer.failures 计数，483 测试全绿——消息排错从人工二分变按 TaskId 一查到底）+ P70 观测面缺口收口批落地（ADR-0018 遗漏项复盘：T1 指标导出管线 MeterProvider / T2 task span 失败标 Error / T3 ActorStoppedFact / T4 插件生命周期结构化日志，489 测试全绿——AI/MCP 追踪与写回/事件/持久化观测挂 11 §4.1 观察项）+ P71 硬编码审计批落地（配置合规复盘：FrameworkSettings 断线修复——DependencyWaitTimeout/QuiesceTimeout 真正可配（宿主→loader→runtime 贯穿），删 3 个死字段；7 处硬编码可调值入配置面（watcher 防抖/写回重试与防抖/结果缓存容量，默认不变），497 测试全绿）+ P72 配置动态语义批落地（Cordis fiber.update 对齐：未托管条目配置修复 re-arm + 框架配置启动冻结契约 ID-50，500 测试全绿））**。实现推进按 13-implementation-plan（13 阶段全部落地），过程记录按 14-implementation-log；六工程（Core/Config/Runtime/Hosting/Sdk/AI）+ 全工程 AOT 零 IL 警告。
 
 - 构建：`dotnet build cordis-csharp.slnx`（已存在；警告即错误）
 - 测试：`dotnet test cordis-csharp.slnx`（已存在；500 个单测绿，M0-M13 全阶段 + P14-P50 + P57-P63 CA 审计落地并收敛（11 项实施 + ADR-0016 + 注记）+ P64-P69 19 号审计六批 + P70 观测性（ADR-0018）+ P71 硬编码审计批 + P72 配置动态语义批）

@@ -6,19 +6,21 @@ created: 2026-08-15
 
 # 09 — 管理层设计
 
-> 三层架构的第二层：CompositionRoot actor 的启动流程、监督接线、进程级优雅关闭。
+> 三层架构的第二层：管理层（宿主组合根）的启动流程、监督接线、进程级优雅关闭。
 > 本文补齐 01-overview §2"管理层"的专题设计（来源：补充排查"管理层无独立专题文档"）。
 
 ## 1. 职责与定位
 
-管理层 = CompositionRoot actor（Proto.Actor，T1），是整个运行时的**编排者**，不参与业务执行：
+管理层 = 宿主组合根 `KeystoneHost`（落地形态，P7），是整个运行时的**编排者**，不参与业务执行：
+
+> **实现备注（2026-08-16，按代码核对）**：设计期原案为"CompositionRoot actor（Proto.Actor，T1）"；落地为 `KeystoneHost` 普通类——管理面（配置状态机/CRUD/watcher/写回/生命周期编排）无消息循环需求，actor 化无收益；**actor 只用于能力域**（串行保证 + 监督）。下文职责清单不变，仅承载实体名修正。
 
 ```
-CompositionRoot actor
-  ├─ 启动：读配置 → 校验 → 构建依赖图 → spawn 能力域 actor
-  ├─ 插件管线：编译（Roslyn）→ 加载（ALC）→ 注册（Keyed Services）→ 挂载
-  ├─ 热更新：文件监听 → 配置/插件变更 → 原子替换/重载
-  ├─ 监督：能力域 actor 崩溃 → 重启策略
+KeystoneHost（宿主组合根）
+  ├─ 启动：读配置 → 校验 → 构建依赖图 → 创建 CapabilityDomain → spawn 能力域 actor
+  ├─ 插件管线：编译（Roslyn）→ 加载（ALC）→ 注册（KeyedServiceStore）→ 挂载
+  ├─ 热更新：文件监听 → 配置/插件变更 → 原地更新/原子替换/重载
+  ├─ 监督：能力域 actor 崩溃 → 重启策略（经 CapabilityDomain）
   └─ 关闭：进程级优雅关闭（全局 quiesce）
 ```
 

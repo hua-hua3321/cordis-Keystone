@@ -1,6 +1,6 @@
 # cordis-csharp 治理规则
 
-> 继承 [`central-governance`](../../central-governance) 通用治理框架。
+> 继承 [`central-governance`](../central-governance) 通用治理框架。
 > 自动生成于 2026-08-15
 
 ---
@@ -19,7 +19,7 @@
 
 ## 共享基础设施
 
-本项目自动继承以下共享 MCP 服务和技能包。详见 [`config/shared-infrastructure.md`](../../central-governance/config/shared-infrastructure.md) 和 [`config/skill-matrix.json`](../../central-governance/config/skill-matrix.json)。
+本项目自动继承以下共享 MCP 服务和技能包。详见 [`config/shared-infrastructure.md`](../central-governance/config/shared-infrastructure.md) 和 [`config/skill-matrix.json`](../central-governance/config/skill-matrix.json)。
 
 | 类型 | 名称 | 说明 |
 |------|------|------|

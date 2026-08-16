@@ -70,7 +70,7 @@ public interface IMiddleware
 }
 ```
 
-管道配置声明顺序（配置层）：
+管道声明顺序（设计期原案·配置层 YAML；**预留未实现**——`EntryOptions` 尚无 pipeline 字段，落地形态 = `CapabilityDomain.Spawn(middlewares)` 代码传入 + `SwapPipelineAsync` 原子热换，见 00 §3.5 实现备注）：
 
 ```yaml
 pipeline:
@@ -82,9 +82,9 @@ pipeline:
 
 ## 5. 短路与错误
 
-- 插件短路：不调用 next()，直接设置结果返回
+- 插件短路：不调用 `next(ctx)`，直接设置结果返回
 - 异常：抛异常 → 管道错误处理（见 05-reliability.md）
-- after 语义：await next() 之后的代码即 after（ASP.NET Core 同款）
+- after 语义：`await next(ctx)` 之后的代码即 after（ASP.NET Core 同款；`RequestDelegate` 携 ctx）
 
 ## 6. 多实例与管道
 

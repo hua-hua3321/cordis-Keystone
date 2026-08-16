@@ -35,7 +35,7 @@ the plugin SDK.
   in-memory by Roslyn into a private, collectible `AssemblyLoadContext` (ALC).
 - **Plugin SDK**: strongly-typed `IPlugin` / `IPluginContext` / `IMiddleware`
   surface — compile-time type safety (no `Dictionary<string, object>` service table).
-- **Middleware pipeline**: `await next()` before/after = before/after semantics;
+- **Middleware pipeline**: `await next(ctx)` before/after = before/after semantics;
   not calling `next` = short-circuit (waterfall semantics).
 - **Event system**: five dispatch modes — `emit` / `parallel` / `serial` /
   `bail` / `waterfall`.
@@ -54,13 +54,14 @@ the plugin SDK.
 
 ```
 ┌─────────────────────────────────────────────┐
-│ Config layer   plugin manifests + domains    │
-│                + pipeline composition          │
+│ Config layer   plugin manifests + capability │
+│                definitions                   │
 ├─────────────────────────────────────────────┤
-│ Management     KeystoneHost / CompositionRoot │
-│                actor: read config → spawn     │
-│                domain actors → compile/load   │
-│                plugins → hot reload → restart  │
+│ Management     KeystoneHost (host composition│
+│                root, not an actor): read     │
+│                config → create domain →      │
+│                compile/load plugins →        │
+│                hot reload → supervised restart│
 ├─────────────────────────────────────────────┤
 │ Domain actor   holds context + pipeline +     │
 │                event bus; requests flow the   │
@@ -77,7 +78,8 @@ and multiple instances are isolated by construction.
 
 - [.NET 10 SDK](https://dot.net/) (`net10.0` + C# 14)
 - Packages: `Keystone.Hosting` (host entry point), `Keystone.Runtime` (plugin
-  interface surface, referenced by plugin compilation)
+  interface surface, referenced by plugin compilation), `Keystone.Sdk`
+  (plugin-author surface: timer extensions / manifest validation)
 
 ## 5. Quick Start
 
@@ -91,11 +93,16 @@ using Keystone.Runtime.Plugins.Manifest;
 // 1) Configure the host: wire "config entry -> manifest / source"
 var options = new KeystoneHostOptions
 {
-    // entry -> plugin manifest (provides/inject service declarations)
-    ManifestProvider = entry => PluginManifest.Load(Path.Combine("plugins", $"{entry.Name}.json")),
+    // entry -> plugin manifest (a record constructed by the embedder; provides/inject declarations)
+    ManifestProvider = entry => new PluginManifest(
+        id: entry.Id ?? "greeter",
+        version: "1.0.0",
+        main: $"{entry.Name}.cs",
+        dependencies: ["Keystone.Runtime"],
+        provides: ["greeter"]),
 
-    // entry -> plugin source (compiled into the ALC)
-    SourceProvider = entry => PluginSource.FromFile(Path.Combine("plugins", $"{entry.Name}.cs")),
+    // source abstraction: manifest.Main resolved against Roots (local files first; swap in a remote IPluginSource)
+    PluginSource = new LocalPluginSource("plugins"),
 
     // config file path (CRUD changes are debounce-written back)
     ConfigFilePath = "keystone.yaml",
@@ -111,9 +118,11 @@ await host.StartFromFileAsync();
 await host.ShutdownAsync();
 ```
 
-> For local development we recommend `LocalPluginSource` (with `Roots`), which
-> also enables `EnablePluginWatch()` to auto cold-reload on source changes.
-> Production can swap in a remote-distribution implementation of `IPluginSource`.
+> `LocalPluginSource` resolves `manifest.Main` against its `Roots` (falling back
+> to the `{root}/{id}/{main}` convention), and also enables
+> `EnablePluginWatch()` to auto cold-reload on source changes. Production can
+> swap in a remote-distribution implementation of `IPluginSource`, or use the
+> synchronous delegate `SourceProvider = entry => new PluginSource(entry.Id!, code)`.
 > Precise wiring is documented in `docs/architecture/09-management-layer.md`.
 
 ### 5.2 Write your first plugin
@@ -126,6 +135,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Keystone.Runtime.Context;
+using Keystone.Runtime.Events;
 using Keystone.Runtime.Plugins.Lifecycle;
 
 namespace MyApp.Plugins;
@@ -140,8 +150,8 @@ public sealed class GreeterPlugin : IPlugin
         // Provide a service: key = service name, type from the interface whitelist
         context.Provide<IGreeter>("greeter", new Greeter(greeting!));
 
-        // Subscribe to events
-        context.Subscribe<TaskCompleted>(e => context.Logger.LogInformation("done: {Id}", e.Id));
+        // Subscribe to events (subscriptions are recycled with the plugin lifecycle)
+        context.Subscribe<TaskCompletedFact>(e => context.Logger.LogInformation("done: {TaskId}", e.TaskId));
 
         return Task.CompletedTask;
     }
@@ -173,11 +183,17 @@ service-level dependencies:
   "id": "plugin-greeter",
   "version": "1.0.0",
   "main": "GreeterPlugin.cs",
-  "dependencies": ["cordis-runtime"],
+  "dependencies": ["Keystone.Runtime"],
   "provides": ["greeter"],
   "inject": ["telemetry"]
 }
 ```
+
+In code the manifest is a `PluginManifest` record (constructed by the
+`ManifestProvider` in 5.1); the JSON above is the idiomatic shape of its declared
+content — the repository ships no built-in JSON loader, so embedders construct
+the record from JSON / a database / etc. themselves (field validation via
+`ManifestSchemaValidator`).
 
 | Field | Dimension | Meaning |
 |-------|-----------|---------|
@@ -195,7 +211,7 @@ The host learns what to load from a YAML "entry tree":
 
 ```yaml
 - id: greeter
-  name: GreeterPlugin          # resolves via the ManifestProvider/SourceProvider in 5.1
+  name: GreeterPlugin          # resolves via the ManifestProvider/PluginSource in 5.1
   inject: [telemetry]          # entry-level dependency (union with manifest inject)
   config:
     greeting: "Hello"
@@ -240,13 +256,18 @@ ctx.Subscribe<TEvent>(e => { /* emit: non-blocking listener */ });
 ctx.SubscribeParallel<TEvent>(async e => { /* parallel: concurrent */ });
 ctx.SubscribeSerial<TEvent>(async e => { /* serial: first bail short-circuits */ return null; });
 ctx.SubscribeBail<TEvent>(e => { /* bail: first non-null short-circuits */ return null; });
-ctx.SubscribeWaterfall<TEvent>(async (e, next) => { /* wrap the next chain */ await next(); });
+ctx.SubscribeWaterfall<TEvent>(async (e, next, ct) => { /* wrap the next chain */ await next(); });
 ctx.EmitFireAndForget<TEvent>(e);            // fire-and-forget publish
 ```
 
 ### Timers (auto-recycled with the plugin lifecycle)
 
+Timers are extension methods from the `Keystone.Sdk` package (namespace
+`Keystone.Sdk.Timers`):
+
 ```csharp
+using Keystone.Sdk.Timers;
+
 ctx.SetTimeout (async () => { }, TimeSpan.FromSeconds(1));
 ctx.SetInterval(async () => { }, TimeSpan.FromMinutes(1));
 ctx.Throttle (async () => { }, TimeSpan.FromSeconds(2));
@@ -277,16 +298,17 @@ public sealed class TimingMiddleware : IMiddleware
     public async Task InvokeAsync(IPluginContext ctx, RequestDelegate next)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await next();                            // not calling next = short-circuit (reject)
+        await next(ctx);                          // RequestDelegate takes ctx; not calling next = short-circuit (reject)
         sw.Stop();
         ctx.Logger.LogInformation("took {Ms}ms", sw.ElapsedMilliseconds);
     }
 }
 ```
 
-Before `await next()` is before, after is after; returning without calling
+Before `await next(ctx)` is before, after is after; returning without calling
 `next` short-circuits (waterfall rejection). The pipeline shares the actor's
-lifecycle; nodes (plugins) can be hot-swapped.
+lifecycle; nodes (plugins) can be hot-swapped (`SwapPipelineAsync` atomically
+replaces the chain).
 
 ## 8. Dependency Gating & Multi-Instance
 

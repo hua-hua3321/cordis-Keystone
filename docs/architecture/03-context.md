@@ -20,7 +20,7 @@ context = 管道 + 事件共享的状态容器。类比 ASP.NET Core 的 HttpCon
 ## 2. 作用域链（决策 D3）
 
 Cordis 的 `extend()` 是原型继承 + 属性 shadow（子 context 覆盖父属性）。
-C# 版用三层混合实现，各取所长，不造轮子：
+设计期原案用三层混合实现（**落地未采用，见代码块后实现备注**）：
 
 ```
 固定骨架（类继承）：
@@ -37,6 +37,8 @@ C# 版用三层混合实现，各取所长，不造轮子：
 - 类继承：适合固定层级（Session/Turn/Request），编译期绑定性能好
 - IFeatureCollection：按 Type 键、后注册覆盖先注册——shadow 语义的官方实现
 - IServiceScope：scope 查找先自己再父——父子链的官方实现
+
+> **实现备注（2026-08-16，按代码核对）**：落地形态 = `ContextFacade` 父子链（子复用父的事件总线/服务 store/logger 工厂，自身独立 Effect/请求 CT 槽）+ isolate map 沿链推导 realm + 进程级共享 `KeyedServiceStore`——"子覆盖父、父不被改"由 isolate map 影子覆盖承载（P21/P57；02 §3/00 §3.3 已同步）。下文 §2.1-§2.3 的 rebind/属主语义在落地形态上继续成立。
 
 **不需要自己实现"作用域链查找"**——三者组合即 Cordis extend() 的完整语义。
 

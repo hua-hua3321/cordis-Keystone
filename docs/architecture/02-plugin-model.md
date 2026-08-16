@@ -52,7 +52,7 @@ var fs = ctx.Get<IFsProvider>();
 插件只能实现宿主接口（`IFsProvider`、`ILLMProvider`、`IShellProvider` 等），
 接口分层提前设计，否则插件写起来难受。
 
-## 3. 键控服务 + 子容器（决策 D2）
+## 3. 键控服务（决策 D2；落地 = 自建 KeyedServiceStore，子容器方案未采用）
 
 **键控服务**解决"强类型接口 + 运行期实例区分"（ADR-0007 决策 1）。实现形态（P57 已落地，18 §2 CA-1）：**自建 `KeyedServiceStore`**（非 MS.DI 键控——后者是 per-scope 容器模型，与 Cordis 全局 store 语义不符，ID-50）：
 
@@ -112,7 +112,7 @@ var plugin = (IPlugin)Activator.CreateInstance(pluginType);
 public interface IPlugin : IAsyncDisposable
 {
     Task InitializeAsync(IPluginContext ctx);
-    // DisposeAsync: 取消全部事件注册、清空 static、释放子容器
+    // DisposeAsync: 取消全部事件注册、清空 static、释放自有资源（服务值经 Provide disposer 注销）
 }
 ```
 
@@ -158,4 +158,4 @@ FileSystemWatcher 监听插件源文件
 - **安全边界**：插件作为同进程可信代码执行（默认），信任边界 = 用户；预留 `IPluginHost` 扩展点支持未来进程隔离（ADR-0001）
 - **插件来源**：本地文件（初始），manifest 记录版本；演进路径 = 本地+版本记录 → 本地+签名校验 → `IPluginSource` 抽象引入远程分发（ADR-0001）
 - **AOT vs JIT**：JIT 运行时 + Roslyn 动态编译（热重载完整），不采用 NativeAOT；未来 AOT 走插件独立进程路线（ADR-0002）
-- **key 语义 / 依赖门控**：key = 服务名（类型+名称二元组），插件 ID 仅子容器分组；manifest 增 `inject` 服务级依赖字段；插件 PENDING 等待依赖就绪，服务变更自动重载（ADR-0007）
+- **key 语义 / 依赖门控**：key = (服务名, realm) 二元组，插件 ID 仅用于属主校验与回收（不参与解析键）；manifest 增 `inject` 服务级依赖字段；插件 PENDING 等待依赖就绪，服务变更自动重载（ADR-0007）

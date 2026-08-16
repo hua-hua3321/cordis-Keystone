@@ -154,7 +154,7 @@ created: 2026-08-15
 ### P11 插件 SDK（M11）
 
 - **目标**：插件开发者公开面与工程化模板
-- **交付物**：`IPlugin.InitializeAsync(ctx, config)`/`IMiddleware` 公开面；`IPluginContext` 完整面（Get/Provide/Subscribe*/Effect[CallerInfo]/GetLogger/Timers，10 §4）；manifest schema（含 `skills: ["skill://..."]` SEP-2640）；**G16 防回归（10 §8 "已接受丢弃"引用表）**；`dotnet new` 模板；示例插件
+- **交付物**：`IPlugin.InitializeAsync(ctx, config)`/`IMiddleware` 公开面；`IPluginContext` 完整面（Get/Provide/Subscribe*/Effect[CallerInfo]/GetLogger/Timers，10 §4）；manifest schema（含 `skills: ["skill://..."]` SEP-2640）；**G16 防回归（10 §8 "已接受丢弃"引用表）**；`dotnet new` 模板；示例插件（**注：示例插件库未建——预留登记于 11 §4；验收条件 1 由模板测试覆盖，SDK 用法参考以 tests 内联插件源码为准，10 §7 已同步**）
 - **验收条件**：
   1. 模板测试：`dotnet new` 创建示例插件 → 编译 → 挂载 → 运行 → 卸载全链路
   2. SDK 面与 10-plugin-sdk 文档逐条一致（含 Effect API 签名）

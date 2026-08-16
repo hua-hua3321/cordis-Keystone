@@ -14,7 +14,7 @@ Cordis（JS）的核心是可组合性：一切皆插件，插件贡献服务、
 C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性，并引入 JS 版本没有的生命周期管理（监督树、热重载）。
 
 **不重造**：DI（IServiceProvider）、中间件管道（ASP.NET Core 形状）、配置（IOptions）、日志（ILogger）、后台服务（IHostedService）、**AI 底层（LLM 适配/技能包/MCP/agent 编排——组合微软官方 MAF/MCP，ADR-0008）**。
-**只实现**：ALC 插件加载层、按插件 ID 分组的注册回收、管道配置 schema、插件 SDK。
+**只实现**：ALC 插件加载层、按插件 ID 分组的注册回收、中间件管道组合（Spawn/SwapPipeline）、插件 SDK。
 
 ## 2. 三层架构
 
@@ -23,13 +23,13 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 │ 配置层（Configuration Layer）                         │
 │   插件清单（plugin-id + 单文件 .cs + 依赖白名单 + 版本）│
 │   能力域定义（capability domain → actor 映射）        │
-│   管道组成（中间件顺序、scope 父子关系）                │
+│   管道组成（中间件顺序、scope 父子关系）※              │
 ├─────────────────────────────────────────────────────┤
-│ 管理层（Management Layer / CompositionRoot actor）   │
-│   读配置 → 为每个能力域 spawn 能力域 actor            │
+│ 管理层（Management Layer = KeystoneHost 组合根，非 actor）│
+│   读配置 → 创建能力域 → spawn 能力域 actor            │
 │   插件编译（Roslyn 内存编译）                         │
 │   插件加载（私有 ALC，依赖 fallback 到 Default）       │
-│   热重载（FileSystemWatcher → 重编译 → 摘旧挂新）     │
+│   热重载（FileSystemWatcher → 重编译/原地更新 → 摘旧挂新）│
 │   监督（能力域 actor 崩溃 → 重启策略）                 │
 ├─────────────────────────────────────────────────────┤
 │ 能力域 actor（Capability Domain Actor）              │
@@ -39,6 +39,8 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 │   context：管道+事件共享的状态容器，插件无状态          │
 └─────────────────────────────────────────────────────┘
 ```
+
+> **实现备注（2026-08-16，按代码核对）**：①管理层落地 = `KeystoneHost` 普通类（宿主组合根，非 actor）——设计期"CompositionRoot actor"原案未采用，actor 只用于能力域（00 §3.1）；②※管道组成与 scope 父子关系当前经代码传入（`CapabilityDomain.Spawn(middlewares, parentContext)` + `SwapPipelineAsync` 热换），配置层条目尚无 pipeline/scope 声明字段（预留，00 §3.5）；③服务隔离落地 = 共享 `KeyedServiceStore`（键 (服务名, realm)）而非每实例独立 scope 根（P54/P57，见 §4 已更新文字）。
 
 ## 3. 生命周期模型
 
@@ -75,8 +77,8 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 | # | 决策 | 理由 | 文档 |
 |---|------|------|------|
 | D1 | 接口白名单而非 Dictionary<string, object> | 保住编译期类型安全 | 02-plugin-model.md |
-| D2 | 键控服务 + 子容器组合 | 类型安全 + 多实例隔离 + 热重载回收 | 02-plugin-model.md |
-| D3 | context 作用域链 = 类继承骨架 + IFeatureCollection shadow + IServiceScope 父子链 | 各取所长，不造轮子 | 03-context.md |
+| D2 | 键控服务（设计期原案含子容器组合） | 类型安全 + 多实例隔离 + 热重载回收；落地 = 自建 `KeyedServiceStore`（键 (服务名, realm)），不引入 per-插件容器（02 §3 实现备注，ID-50） | 02-plugin-model.md |
+| D3 | context 作用域链（设计期原案：类继承骨架 + IFeatureCollection shadow + IServiceScope 父子链） | 各取所长，不造轮子；落地 = `ContextFacade` 父链 + isolate map + 共享 store（03 §2 实现备注，P21/P57） | 03-context.md |
 | D4 | 管道（waterfall）+ 事件（parallel/emit）双轨 | 请求链走管道，观察者走事件 | 04-pipeline.md |
 | D5 | 热重载 = Roslyn 内存编译 + 私有 ALC + disposer 协议 | C# 社区标准姿势 | 02-plugin-model.md |
 | D6 | 状态外置：插件无状态，状态在 context | 热重载不丢状态 | 03-context.md |
@@ -89,13 +91,13 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 - 不强制"一切皆插件"到 UI 层
 - 不引入 JS 生态兼容层
 
-## 7. 已决决策（ADR-0001 ~ 0010）
+## 7. 已决决策（ADR-0001 ~ 0018）
 
-设计期全部待定决策已收敛为 ADR，见 [decisions/](../decisions/README.md)：
+设计期全部待定决策已收敛为 ADR，完整索引见 [decisions/](../decisions/README.md)：
 
 - ADR-0001 插件安全边界（同进程可信代码默认）+ 插件来源（本地起步演进）
 - ADR-0002 AOT vs JIT（JIT + Roslyn 动态编译，不采用 NativeAOT）
-- ADR-0003 context 并发模型（串行默认）+ 管道配置热更新（原子替换）
+- ADR-0003 context 并发模型（串行默认）+ 管道热更新（原子替换）
 - ADR-0004 消息契约（Payload 强类型 + 显式序列化契约）+ 跨域编排（TaskId 贯穿 + 全等聚合）
 - ADR-0005 插件生命周期状态机 + quiesce 收敛协议
 - ADR-0006 事件分发模式全集（serial/bail 纳入）
@@ -103,5 +105,8 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 - ADR-0008 AI 能力域组合（组合微软官方 MAF/MCP，单向依赖，不重造 AI 底层）
 - ADR-0009 事件持久化（事实事件 append-only 事件日志 + IEventStore）
 - ADR-0010 G6/G9 取舍（弃用 intercept 通用语义与 check 谓词）
+- ADR-0011~0016 配置族决策（!!js 弃用 / 静态插值 / 提供者抽象 / YAML-only 收敛 ×2 / JSON 弃用）
+- ADR-0017 真热更新（config-only 原地重启，同 ALC）
+- ADR-0018 观测性框架（OTel 骨架三层）
 
 遗留待定已收敛：插件 SDK 体验 → [10-plugin-sdk.md](10-plugin-sdk.md)；可观测性细节（指标/链路）→ [05-reliability.md](05-reliability.md) §5；配置层与管理层细节 → [08-configuration-layer.md](08-configuration-layer.md) / [09-management-layer.md](09-management-layer.md)。

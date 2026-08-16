@@ -19,7 +19,7 @@ Keystone 是一个**配置驱动、支持多实例隔离与热重载**的 .NET �
 
 - **文件式插件**：单文件 `.cs` + 顶层语句，经 Roslyn 内存编译进私有可卸载 `AssemblyLoadContext`（ALC）。
 - **插件 SDK**：`IPlugin` / `IPluginContext` / `IMiddleware` 强类型接口面，编译期类型安全（无 `Dictionary<string, object>` 服务表）。
-- **中间件管道**：`await next()` 前后即 before/after，不调用 `next` 即短路（waterfall 语义）。
+- **中间件管道**：`await next(ctx)` 前后即 before/after，不调用 `next` 即短路（waterfall 语义）。
 - **事件系统**：`emit` / `parallel` / `serial` / `bail` / `waterfall` 五种分发模式。
 - **依赖门控激活**：插件 `inject` 的服务未就绪前保持 `PENDING`，就绪后自动激活；服务变更自动重载依赖方。
 - **热重载**：仅配置变化走「同 ALC 原地热更新」，结构变化走「冷重启」，状态外置不丢数据。
@@ -30,11 +30,11 @@ Keystone 是一个**配置驱动、支持多实例隔离与热重载**的 .NET �
 
 ```
 ┌─────────────────────────────────────────────┐
-│ 配置层  插件清单 + 能力域定义 + 管道组成        │
+│ 配置层  插件清单 + 能力域定义                  │
 ├─────────────────────────────────────────────┤
-│ 管理层  KeystoneHost / CompositionRoot actor │
-│   读配置 → spawn 能力域 actor → 编译/加载插件  │
-│   → 热重载 → 监督重启                           │
+│ 管理层  KeystoneHost（宿主组合根，非 actor）   │
+│   读配置 → 创建能力域 → 编译/加载插件           │
+│   → 热重载 → 监督重启                          │
 ├─────────────────────────────────────────────┤
 │ 能力域 actor  持 context + 管道 + 事件总线      │
 │   请求链走管道（waterfall），观察者走事件         │
@@ -46,7 +46,7 @@ Keystone 是一个**配置驱动、支持多实例隔离与热重载**的 .NET �
 ## 4. 环境要求
 
 - [.NET 10 SDK](https://dot.net/)（`net10.0` + C# 14）
-- 引用包：`Keystone.Hosting`（宿主入口）、`Keystone.Runtime`（插件接口面，供插件编译引用）
+- 引用包：`Keystone.Hosting`（宿主入口）、`Keystone.Runtime`（插件接口面，供插件编译引用）、`Keystone.Sdk`（插件作者友好面：计时器扩展 / manifest 校验）
 
 ## 5. 快速开始
 
@@ -60,11 +60,16 @@ using Keystone.Runtime.Plugins.Manifest;
 // 1) 配置宿主：把「配置条目 → manifest / 源码」接起来
 var options = new KeystoneHostOptions
 {
-    // 条目 → 插件清单（provides/inject 服务声明）
-    ManifestProvider = entry => PluginManifest.Load(Path.Combine("plugins", $"{entry.Name}.json")),
+    // 条目 → manifest（记录形态，由嵌入方构造——provides/inject 服务声明）
+    ManifestProvider = entry => new PluginManifest(
+        id: entry.Id ?? "greeter",
+        version: "1.0.0",
+        main: $"{entry.Name}.cs",
+        dependencies: ["Keystone.Runtime"],
+        provides: ["greeter"]),
 
-    // 条目 → 插件源码（编译进 ALC）
-    SourceProvider = entry => PluginSource.FromFile(Path.Combine("plugins", $"{entry.Name}.cs")),
+    // 获取端抽象：manifest.Main 相对根目录解析（本地文件起步，可换远程分发实现 IPluginSource）
+    PluginSource = new LocalPluginSource("plugins"),
 
     // 配置文件路径（CRUD 变更会防抖写回）
     ConfigFilePath = "keystone.yaml",
@@ -80,7 +85,7 @@ await host.StartFromFileAsync();
 await host.ShutdownAsync();
 ```
 
-> 本地开发推荐用 `LocalPluginSource`（带 `Roots`）作为获取端抽象，它同时支持 `EnablePluginWatch()` 监听源文件变更自动冷重启。生产环境可替换为远程分发实现 `IPluginSource`。更精确的接线见 `docs/architecture/09-management-layer.md`。
+> `LocalPluginSource` 按 `manifest.Main` 相对 `Roots` 解析（缺省回退 `{root}/{id}/{main}` 约定布局），它同时支持 `EnablePluginWatch()` 监听源文件变更自动冷重启。生产环境可替换为远程分发实现 `IPluginSource`；也可改用同步委托 `SourceProvider = entry => new PluginSource(entry.Id!, code)` 直接给源码。更精确的接线见 `docs/architecture/09-management-layer.md`。
 
 ### 5.2 编写第一个插件
 
@@ -91,6 +96,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Keystone.Runtime.Context;
+using Keystone.Runtime.Events;
 using Keystone.Runtime.Plugins.Lifecycle;
 
 namespace MyApp.Plugins;
@@ -105,8 +111,8 @@ public sealed class GreeterPlugin : IPlugin
         // 提供服务：key = 服务名，类型由接口白名单决定
         context.Provide<IGreeter>("greeter", new Greeter(greeting!));
 
-        // 订阅事件
-        context.Subscribe<TaskCompleted>(e => context.Logger.LogInformation("done: {Id}", e.Id));
+        // 订阅事件（订阅随插件生命周期回收，无需手动退订）
+        context.Subscribe<TaskCompletedFact>(e => context.Logger.LogInformation("done: {TaskId}", e.TaskId));
 
         return Task.CompletedTask;
     }
@@ -137,11 +143,13 @@ public sealed class Greeter : IGreeter
   "id": "plugin-greeter",
   "version": "1.0.0",
   "main": "GreeterPlugin.cs",
-  "dependencies": ["cordis-runtime"],
+  "dependencies": ["Keystone.Runtime"],
   "provides": ["greeter"],
   "inject": ["telemetry"]
 }
 ```
+
+代码侧的 manifest 是 `PluginManifest` 记录（由 5.1 的 `ManifestProvider` 构造）；上面的 JSON 是其声明内容的惯用书写形态——仓库未内置 JSON 文件加载器，嵌入方可自行从 JSON / 数据库等来源构造记录（字段校验用 `ManifestSchemaValidator`）。
 
 | 字段 | 维度 | 说明 |
 |------|------|------|
@@ -156,7 +164,7 @@ public sealed class Greeter : IGreeter
 
 ```yaml
 - id: greeter
-  name: GreeterPlugin          # 对应 5.1 中 ManifestProvider/SourceProvider 的定位
+  name: GreeterPlugin          # 对应 5.1 中 ManifestProvider/PluginSource 的定位
   inject: [telemetry]          # 条目级依赖声明（与 manifest inject 并集合并）
   config:
     greeting: "你好"
@@ -196,13 +204,17 @@ ctx.Subscribe<TEvent>(e => { /* emit：监听不阻塞 */ });
 ctx.SubscribeParallel<TEvent>(async e => { /* parallel：并发 */ });
 ctx.SubscribeSerial<TEvent>(async e => { /* serial：首个 bail 短路 */ return null; });
 ctx.SubscribeBail<TEvent>(e => { /* bail：首个非空短路 */ return null; });
-ctx.SubscribeWaterfall<TEvent>(async (e, next) => { /* 包裹 next 链 */ await next(); });
+ctx.SubscribeWaterfall<TEvent>(async (e, next, ct) => { /* 包裹 next 链 */ await next(); });
 ctx.EmitFireAndForget<TEvent>(e);            // fire-and-forget 发布
 ```
 
 ### 计时器（随插件生命周期自动回收）
 
+计时器是 `Keystone.Sdk` 包的扩展方法（命名空间 `Keystone.Sdk.Timers`）：
+
 ```csharp
+using Keystone.Sdk.Timers;
+
 ctx.SetTimeout (async () => { }, TimeSpan.FromSeconds(1));
 ctx.SetInterval(async () => { }, TimeSpan.FromMinutes(1));
 ctx.Throttle (async () => { }, TimeSpan.FromSeconds(2));
@@ -212,7 +224,7 @@ ctx.Debounce (async () => { }, TimeSpan.FromSeconds(2));
 ### 日志
 
 ```csharp
-ctx.Logger.LogInformation("plugin {Id} started", ctx is not null ? "" : "");
+ctx.Logger.LogInformation("plugin started");
 ```
 
 日志走 `ctx.Logger`（category = `{域}/{插件 ID}`），**禁止直接 `Console`**。
@@ -232,14 +244,14 @@ public sealed class TimingMiddleware : IMiddleware
     public async Task InvokeAsync(IPluginContext ctx, RequestDelegate next)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await next();                            // 不调 next 即短路（否决请求）
+        await next(ctx);                          // RequestDelegate 携 ctx；不调 next 即短路（否决请求）
         sw.Stop();
         ctx.Logger.LogInformation("took {Ms}ms", sw.ElapsedMilliseconds);
     }
 }
 ```
 
-`await next()` 之前是 before，之后是 after；不调用 `next` 直接返回 = 短路（waterfall 否决）。管道与 actor 同生命周期，节点（插件）可热重载替换。
+`await next(ctx)` 之前是 before，之后是 after；不调用 `next` 直接返回 = 短路（waterfall 否决）。管道与 actor 同生命周期，节点（插件）可热重载替换（`SwapPipelineAsync` 原子换链）。
 
 ## 8. 依赖门控与多实例
 

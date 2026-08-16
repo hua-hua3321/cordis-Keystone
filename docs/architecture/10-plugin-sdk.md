@@ -47,7 +47,7 @@ public interface IMiddleware
 }
 ```
 
-形状 A 定案（04-pipeline §2）：`await next()` 之前 = before，之后 = after；不调用 next 直接返回 = 短路。
+形状 A 定案（04-pipeline §2）：`await next(ctx)` 之前 = before，之后 = after；不调用 `next` 直接返回 = 短路（`RequestDelegate` 携 ctx）。
 
 ## 4. IPluginContext（插件侧门面）
 
@@ -114,8 +114,8 @@ manifest 校验器（启动期 fail-fast）：id 唯一、version 合法、依�
 
 ## 7. 模板工程与示例
 
-- **`dotnet new cordis-plugin`**：脚手架生成插件骨架（manifest + 单文件 .cs + 测试工程），对齐 Cordis `create-cordis`（补充排查 N4）
-- 示例插件库：fs-local、llm-proxy、telemetry（观察者）、auth（决策型 serial 事件）、rate-limit（管道）——每个示例对应一种插件形态，作为 SDK 用法参考
+- **`dotnet new keystone-plugin`**：脚手架生成插件骨架（单文件 .cs，`templates/keystone-plugin/`），全链路验收（创建 → Roslyn 编译 → 挂载 → 运行 → 卸载，`TemplateTests`）；对齐 Cordis `create-cordis` 的定位（补充排查 N4）
+- 示例插件库：**未建（预留）**——原计划 fs-local、llm-proxy、telemetry（观察者）、auth（决策型 serial 事件）、rate-limit（管道）五种形态示例，作为 SDK 用法参考；当前 SDK 用法参考以 `tests/` 内联插件源码（Hosting/Runtime 集成测试）+ 本文档 §2-§6 为准。补建登记于 [11-gap-register.md](11-gap-register.md) §4（触发条件：SDK 对外发布 / 用户索例）
 - 插件调试：Roslyn 内存编译带 embedded PDB + source link（02-plugin-model §9），调试器可进插件代码
 
 ## 8. SDK 约束清单（插件作者义务）
@@ -135,8 +135,8 @@ manifest 校验器（启动期 fail-fast）：id 唯一、version 合法、依�
 
 | 已接受丢弃 | 决策依据 | 替代物 |
 |-----------|---------|--------|
-| `ctx.accessor`（计算属性） | G16 / 12 §16 | 普通属性 + IFeatureCollection |
-| `ctx.mixin`（成员混入） | G16 / 12 §16 | 接口默认实现 / 门面方法 |
+| `ctx.accessor`（计算属性） | G16 / 07 §2.3 | 普通属性 / 接口成员（context 门面；IFeatureCollection 为设计期原案未采用） |
+| `ctx.mixin`（成员混入） | G16 / 07 §2.3 | 接口默认实现 / 门面方法 |
 | `ctx.trace`/`bind`（运行期 proxy 重绑定） | G16 / 12 §7.1 H1 | Activity.Current + CallerMemberName |
 | `intercept` 通用语义（internal/get/set 瀑布） | G6 / ADR-0010 | IContextInterceptor（H3，P2 已实现） |
 | `check` 谓词（服务可用门控回调） | G9 / ADR-0010 | 依赖门控（ADR-0007 PENDING） |

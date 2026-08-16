@@ -36,13 +36,20 @@ hot reload, and a middleware-pipeline execution model.
 
 ## Current Status
 
-**Implementation complete (M0–M13 all passed, 500 tests green)**: the Keystone
-1.0 framework is runnable — all thirteen phases are delivered (contracts /
-context / events / lifecycle / pipeline / loading / configuration / management /
-capability domains / observability / persistence / SDK / AI composition), with
-zero AOT IL warnings across the solution (Proto.Actor / MAF exceptions per
-ADR-0015). This repository is the Single Source of Truth for the design and
-implementation progress.
+**Implementation complete (M0–M13 all passed) + three Cordis parity audit rounds
+converged (P14–P72, 500 tests green)**: the Keystone 1.0 framework is runnable —
+all thirteen phases are delivered (contracts / context / events / lifecycle /
+pipeline / loading / configuration / management / capability domains /
+observability / persistence / SDK / AI composition). Follow-up batches closed
+the post-implementation review (doc 16), the code-level parity audit (doc 18),
+and the second parity verification (doc 19 — 54 registered findings, fixed in
+six batches P64–P69), plus the observability program (ADR-0018), a hardcoding
+audit (P71), and config dynamic semantics (P72). **Cordis core framework
+semantics are now code-level aligned** (a few mechanisms explicitly dropped or
+accepted-as-different, see docs/architecture/11-gap-register.md). Zero AOT IL
+warnings across the solution (Proto.Actor / MAF exceptions per ADR-0015). This
+repository is the Single Source of Truth for the design and implementation
+progress.
 
 ## Project Positioning
 
@@ -54,8 +61,8 @@ implementation progress.
   adapters / skill packs / MCP / agent orchestration — composed from Microsoft's
   official MAF/MCP, ADR-0008)**.
 - **We only implement what's framework-specific**: the ALC plugin loader,
-  plugin-ID-scoped registration/recycling, the pipeline config schema, and the
-  plugin SDK.
+  plugin-ID-scoped registration/recycling, middleware pipeline composition
+  (Spawn / SwapPipeline), and the plugin SDK.
 - **Configuration unbundled**: configuration sources are not hard-locked — a
   provider abstraction (ADR-0013), default local YAML (development, ADR-0014),
   with AgileConfig as a reserved optional source; users may implement any source.
@@ -65,10 +72,10 @@ implementation progress.
 
 | Mechanism | Description | Docs |
 |-----------|-------------|------|
-| Plugin hot reload | Roslyn in-memory compilation + private Collectible ALC + quiesce convergence gate | [02-plugin-model.md](docs/architecture/02-plugin-model.md), ADR-0005 |
+| Plugin hot reload | Roslyn in-memory compilation + private Collectible ALC + quiesce convergence gate; config-only changes take the in-place same-ALC path (ADR-0017) | [02-plugin-model.md](docs/architecture/02-plugin-model.md), ADR-0005/0017 |
 | Dependency-gated activation | manifest `inject` service-level deps; PENDING waits until deps are ready | ADR-0007 |
 | Event dispatch | five modes — emit / parallel / serial / bail / waterfall | ADR-0006 |
-| Multi-instance isolation | independent context + child container + service-level isolate | [03-context.md](docs/architecture/03-context.md) |
+| Multi-instance isolation | independent contexts + one shared keyed service store (key = (service name, realm), two-tier isolate domains) | [03-context.md](docs/architecture/03-context.md) |
 | Config provider abstraction | M.E.C `IConfigurationSource` contract + default local YAML (AOT-safe YamlStream parsing); AgileConfig reserved optional source | ADR-0013/0014, [08-configuration-layer.md](docs/architecture/08-configuration-layer.md) |
 | AI capability composition | compose Microsoft's official MAF/MCP (SEP-2640 skill packs, MCP both ends, Workflows); one-directional dependency, core stays free | ADR-0008 |
 

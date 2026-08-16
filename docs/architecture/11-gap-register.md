@@ -47,7 +47,7 @@ created: 2026-08-15
 | N1 | 插件 Config schema 校验 | ✅ 已收敛 | 08 §5 + 10 §2 | 校验后注入 |
 | N2 | 配置条目语义（id/disabled/group/isolate） | ✅ 已收敛 | 08 §3 | 分层叠加见 08 §4 |
 | N3 | disposal-aware 计时器 | ✅ 已收敛 | 10 §4 | 随 fiber 回收 |
-| N4 | 脚手架/模板工程 | ✅ 已收敛 | 10 §7 | dotnet new cordis-plugin |
+| N4 | 脚手架/模板工程 | ✅ 已收敛 | 10 §7 | dotnet new keystone-plugin（模板 shortName，TemplateTests 全链路验收） |
 | N5 | 配置热更新触发 | ✅ 已收敛 | 08 §6 | 双触发（插件源文件/配置文件） |
 | N6 | config 注入（插件拿配置） | ✅ 已收敛 | 10 §2 | InitializeAsync(ctx, config) |
 | O1 | 事件持久化存储 | ✅ 已收敛 | ADR-0009 + 03 §4 | append-only 事件日志 + IEventStore |
@@ -57,6 +57,7 @@ created: 2026-08-15
 | O5 | 中间件形状 A/B | ✅ 已收敛 | 04 §2 | 形状 A（IMiddleware）定案 |
 | O6 | 插件脚本/DLL 双轨 | ✅ 已收敛 | 00-tech-stack T11 | 文件式应用 + ALC 管线 |
 | O7 | AI 能力域组合 | ✅ 已收敛 | ADR-0008 | MAF/MCP 单向依赖；**MCP 双端已落地（P14）**：MAF Mcp 无稳定版 → 协议层组合官方稳定 SDK `ModelContextProtocol.Core` 2.2.0（ID-12），公共面 = Keystone 协议中立契约隔离（ID-13，调用方零 SDK 类型） |
+| N7 | 超时/熔断/重试策略接入运行链（DC-5 剩余面） | ⚠️ 部分（原语已实现，**宿主链未接线·预留**） | 05 §3 实现备注 + 17 §2 DC-5 | 已接线 = 依赖等待超时（PluginRuntime，DependencyWaitTimeout）/ quiesce 超时 / ShutdownTimeout / 慢请求阈值（ObservabilityOptions）；`TimeoutPolicy`/`RetryPolicy`/`CircuitBreaker` 为已实现策略原语（ReliabilityTests 单测），嵌入方可显式组合；接入默认链需 ADR（触发：初始化/管道级超时熔断真实需求出现） |
 
 ### 3.1 框架层通读补充项（H/M/L 系列，来源 12-cordis-semantics-mapping §7-§9）
 
@@ -124,11 +125,13 @@ created: 2026-08-15
 | G16 防回归 | ⚠️ 部分 | 10-plugin-sdk §8 补"已接受丢弃"引用（accessor/mixin/trace 等 5 项，来源 07 §2.3） |
 | O2 TaskId 映射 | ✅ 已验证（P12） | WorkflowBridge fan-out/fan-in TaskId/ParentTaskId 贯穿测试（ADR-0008 不回退项闭合） |
 | 事件格式迁移 | 实现期 | ADR-0009 风险表：StoredFact.SchemaVersion 迁移策略 |
+| 示例插件库（10 §7 原计划 5 例） | ⏸ 预留未建 | 模板已落地（keystone-plugin + TemplateTests）；示例库补建触发条件 = SDK 对外发布 / 用户索例（素材可复用 tests 内联插件源码） |
+| `ITransactional` / `IIdempotencyKeyProvider`（05 §7 预留接口） | ⏸ 预留未实现 | 现状：配置层 diff 事务（ApplyDiffTransactionallyAsync，P59/P64）+ TaskId 幂等去重（DC-13）；插件级补偿/业务幂等键待真实事务场景出现再引入（05 §7 注记） |
 | （H2/H3/M1/M3 已随 P2/P6/P7 落地闭合，见 §3.1） | ✅ | — |
 
 ### 3.4 第二轮等价性复核（CAV 系列，来源 19）
 
-> 2026-08-16 全量再对照（19 号文档）：6 路并行深审 + 表面自查，108 项发现。**P0 七项正确性缺陷 + P1 竞态七项 + 语义偏差九项待决策**——当前唯一开放批次。
+> 2026-08-16 全量再对照（19 号文档）：6 路并行深审 + 表面自查，**54 项登记行**（P0 七项 + P1 竞态七项 + 语义偏差九项 + P2 三十一项；P2 多行合并子发现，源级编号 SV/CF/EV/LG/LD/IN——口径见 19 §0）。**P0 七项正确性缺陷 + P1 竞态七项 + 语义偏差九项待决策**——当前唯一开放批次。
 
 | 批 | 项 | 状态 | 落点 |
 |----|----|------|------|

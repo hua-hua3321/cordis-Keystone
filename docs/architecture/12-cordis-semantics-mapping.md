@@ -89,6 +89,8 @@ services.AddKeyedScoped<ILogger, PluginLogger>("plugin-auth",
         sp.GetRequiredService<IOptionsMonitor<LoggerOptions>>().Get((string)key!)));
 ```
 
+> **落地注记（2026-08-16）**：本节与 §1 表的 keyed-services 形态是**对应物建议**（MS.DI 惯用法示例）；实际落地选择 = `IOptionsMonitor` 命名选项（§2.2）+ 宿主级 `ServiceOptions`（CA-12/P60，11 §3.3）——服务模型为自建 `KeyedServiceStore`（键 (服务名, realm)，02 §3），不依赖 MS.DI keyed 注册。
+
 ### 2.5 差异本质（为什么方向是对的）
 
 | | Cordis intercept | C# 命名选项 |

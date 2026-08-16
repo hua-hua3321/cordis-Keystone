@@ -26,6 +26,8 @@ created: 2026-08-15
 | [adr-0015-proto-actor-aot-exception.md](adr-0015-proto-actor-aot-exception.md) | Proto.Actor 保留 + 库自身 AOT 警告例外（规则 0 第二处例外） | accepted | 2026-08-15 |
 | [adr-0016-config-format-yaml-only.md](adr-0016-config-format-yaml-only.md) | 配置格式收敛 YAML-only，弃用 JSON（CA-8；插值互斥 + IConfigProvider 后门） | accepted | 2026-08-16 |
 | [adr-0014-config-yaml-only-p0.md](adr-0014-config-yaml-only-p0.md) | 开发阶段配置源收敛为 YAML（配置中心延后启用，AgileConfig 降为预留可选源，收敛 ADR-0013） | accepted | 2026-08-15 |
+| [adr-0017-true-hot-update-in-place.md](adr-0017-true-hot-update-in-place.md) | 真热更新——config-only 原地重启（同 ALC 新实例，不重编译；19 号审计 D-1/LD-6） | accepted | 2026-08-15 |
+| [adr-0018-observability-framework.md](adr-0018-observability-framework.md) | 观测性框架——OTel 骨架三层架构（L1 探针纯 BCL / L2 事实复用 EventStore / L3 导出仅 Hosting） | accepted | 2026-08-15 |
 
 ## 约定
 
