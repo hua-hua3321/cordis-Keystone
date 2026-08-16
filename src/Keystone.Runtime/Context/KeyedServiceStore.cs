@@ -177,7 +177,8 @@ public sealed class KeyedServiceStore
             }
             else
             {
-                toNotify = scope.Changes;
+                // 集合语义（对齐 Cordis notify(names[])）：同键多次增删并入后只投递一次
+                toNotify = scope.Changes.Distinct().ToList();
             }
         }
 

@@ -34,14 +34,14 @@ public class ServiceValueUnloadTests
     [Fact]
     public async Task Runtime_provided_value_is_removed_after_plugin_unloads()
     {
-        var registry = new ServiceRegistry();
+        var discovery = new InMemoryServiceDiscovery(new KeyedServiceStore());
         var provider = new FakeProvider();
         var root = new ContextFacade("root");
         ContextFacade? providerCtx = null;
         var runtime = new PluginRuntime(
             new PluginManifest("provider", "1.0.0", "P.cs", ["cordis-runtime"], [], []),
             _ => provider,
-            registry,
+            discovery,
             name =>
             {
                 providerCtx = new ContextFacade(name, root);
@@ -62,13 +62,13 @@ public class ServiceValueUnloadTests
     [Fact]
     public async Task Consumer_does_not_see_stale_value_after_provider_unloads()
     {
-        var registry = new ServiceRegistry();
+        var discovery = new InMemoryServiceDiscovery(new KeyedServiceStore());
         var root = new ContextFacade("root");
         var provider = new FakeProvider();
         var providerRuntime = new PluginRuntime(
             new PluginManifest("provider", "1.0.0", "P.cs", ["cordis-runtime"], [], []),
             _ => provider,
-            registry,
+            discovery,
             name => new ContextFacade(name, root));
         await providerRuntime.StartAsync();
 

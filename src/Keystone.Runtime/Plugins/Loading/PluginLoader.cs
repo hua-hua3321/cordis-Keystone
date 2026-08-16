@@ -14,7 +14,7 @@ namespace Keystone.Runtime.Plugins.Loading;
 public sealed class PluginLoader : IAsyncDisposable
 {
     private readonly PluginManifest _manifest;
-    private readonly IServiceRegistry _registry;
+    private readonly IServiceDiscovery _discovery;
     private readonly Func<string, IPluginContext> _contextFactory;
     private readonly IReadOnlyDictionary<string, object?> _config;
 
@@ -24,12 +24,12 @@ public sealed class PluginLoader : IAsyncDisposable
 
     private PluginLoader(
         PluginManifest manifest,
-        IServiceRegistry registry,
+        IServiceDiscovery discovery,
         Func<string, IPluginContext> contextFactory,
         IReadOnlyDictionary<string, object?>? config = null)
     {
         _manifest = manifest;
-        _registry = registry;
+        _discovery = discovery;
         _contextFactory = contextFactory;
         _config = config ?? new Dictionary<string, object?>(StringComparer.Ordinal);
     }
@@ -44,16 +44,16 @@ public sealed class PluginLoader : IAsyncDisposable
     public static async Task<PluginLoader> CreateAsync(
         PluginSource source,
         PluginManifest manifest,
-        IServiceRegistry registry,
+        IServiceDiscovery discovery,
         Func<string, IPluginContext> contextFactory,
         IReadOnlyDictionary<string, object?>? config = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(manifest);
-        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(discovery);
         ArgumentNullException.ThrowIfNull(contextFactory);
 
-        var loader = new PluginLoader(manifest, registry, contextFactory, config);
+        var loader = new PluginLoader(manifest, discovery, contextFactory, config);
         await loader.LoadSourceAsync(source).ConfigureAwait(false);
         return loader;
     }
@@ -128,7 +128,7 @@ public sealed class PluginLoader : IAsyncDisposable
             ?? throw new KeystoneException(ErrorCode.LifecycleLoadFailed, $"plugin '{source.Id}' could not be instantiated");
 
         _alc = alc;
-        _runtime = new PluginRuntime(_manifest, _ => plugin, _registry, _contextFactory, _config);
+        _runtime = new PluginRuntime(_manifest, _ => plugin, _discovery, _contextFactory, config: _config);
         await _runtime.StartAsync().ConfigureAwait(false);
     }
 }

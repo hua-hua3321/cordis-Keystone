@@ -25,7 +25,7 @@ public class PerformanceSmokeTests
             await using var loader = await PluginLoader.CreateAsync(
                 new PluginSource($"perf{i}", SampleSources.V1),
                 Manifest,
-                new ServiceRegistry(),
+                new InMemoryServiceDiscovery(new KeyedServiceStore()),
                 id => new Context.ContextFacade(id));
             Assert.Equal(PluginLifecycleState.Active, loader.Runtime.State);
         }

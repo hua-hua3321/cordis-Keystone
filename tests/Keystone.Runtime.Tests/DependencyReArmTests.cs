@@ -32,13 +32,14 @@ public class DependencyReArmTests
     [Fact]
     public async Task Dependency_reappearance_restarts_dependent_plugin()
     {
-        var registry = new ServiceRegistry();
-        registry.Register("fs", "provider-x");
+        var store = new KeyedServiceStore();
+        var discovery = new InMemoryServiceDiscovery(store);
+        store.Provide("fs", string.Empty, new object(), "provider-x");
         var plugin = new FakePlugin();
         var runtime = new PluginRuntime(
             new PluginManifest("p", "1.0.0", "P.cs", ["cordis-runtime"], [], ["fs"]),
             _ => plugin,
-            registry,
+            discovery,
             _ => new ContextFacade("p"));
 
         await runtime.StartAsync();
@@ -46,13 +47,13 @@ public class DependencyReArmTests
         Assert.Equal(1, plugin.InitializeCount);
 
         // 依赖消失 → 依赖方卸载（DISPOSED）
-        registry.Unregister("fs", "provider-x");
+        store.Remove("fs", string.Empty, "provider-x");
         await WaitForStateAsync(runtime, PluginLifecycleState.Disposed);
         Assert.Equal(PluginLifecycleState.Disposed, runtime.State);
         Assert.Equal(1, plugin.DisposeCount);
 
         // 依赖重现 → 依赖方自动重启（G-C2 re-arm）
-        registry.Register("fs", "provider-x");
+        store.Provide("fs", string.Empty, new object(), "provider-x");
         await WaitForStateAsync(runtime, PluginLifecycleState.Active);
         Assert.Equal(PluginLifecycleState.Active, runtime.State);
         Assert.Equal(2, plugin.InitializeCount); // 重启：第二次初始化

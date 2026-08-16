@@ -192,7 +192,7 @@ public class PluginLifecycleFactTests
     {
         // DC-11：PluginRuntime 生命周期事实（启动/失败必须存活，ADR-0009/03 §4）
         var store = new InMemoryEventStore();
-        var registry = new Keystone.Runtime.Plugins.Services.ServiceRegistry();
+        var registry = new Keystone.Runtime.Plugins.Services.InMemoryServiceDiscovery(new Keystone.Runtime.Context.KeyedServiceStore());
 
         var manifestOk = new Keystone.Runtime.Plugins.Manifest.PluginManifest("ok", "1.0.0", "A.cs", [], [], []);
         var manifestFail = new Keystone.Runtime.Plugins.Manifest.PluginManifest("fail", "1.0.0", "B.cs", [], [], []);

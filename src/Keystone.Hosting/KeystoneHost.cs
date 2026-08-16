@@ -17,7 +17,7 @@ namespace Keystone.Hosting;
 public sealed class KeystoneHost : IAsyncDisposable
 {
     private readonly KeystoneHostOptions _options;
-    private readonly IServiceRegistry _registry = new ServiceRegistry();
+    private IServiceDiscovery _discovery = null!; // InitializeAsync 内投影 root store（值层唯一事实源）
     private readonly List<HostedPlugin> _plugins = [];
     private readonly List<EntryOptions> _tree = [];
     private readonly List<Func<PatchContextEventArgs, Func<Task>, Task>> _patchContextHandlers = [];
@@ -95,6 +95,8 @@ public sealed class KeystoneHost : IAsyncDisposable
             loggerFactory: _options.LoggerFactory,
             eventStore: _options.EventStore,
             logCategoryPrefix: _options.EnableCapabilityDomain ? _options.CapabilityDomainName : null);
+        _discovery = new InMemoryServiceDiscovery(_rootContext.Services); // 发现层投影（P57-T4）
+
         if (_options.EnableCapabilityDomain)
         {
             _capabilityDomain = CapabilityDomain.Create(_options.CapabilityDomainName);
@@ -339,7 +341,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(manifest);
 
         var loader = await PluginLoader.CreateAsync(
-            source, manifest, _registry, id => new ContextFacade(id, _rootContext)).ConfigureAwait(false);
+            source, manifest, _discovery, id => new ContextFacade(id, _rootContext)).ConfigureAwait(false);
         _plugins.Add(new HostedPlugin(manifest.Id, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(new EntryOptions { Id = manifest.Id, Name = source.Id }));
     }
@@ -371,7 +373,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
 
         var loader = await PluginLoader.CreateAsync(
-            source, manifest, _registry, ctxId => new ContextFacade(ctxId, _rootContext), config).ConfigureAwait(false);
+            source, manifest, _discovery, ctxId => new ContextFacade(ctxId, _rootContext), config).ConfigureAwait(false);
 
         _plugins.Add(new HostedPlugin(id, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(entry));
@@ -558,7 +560,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
 
         var loader = await PluginLoader.CreateAsync(
-            source, manifest, _registry, id => new ContextFacade(id, _rootContext), config).ConfigureAwait(false);
+            source, manifest, _discovery, id => new ContextFacade(id, _rootContext), config).ConfigureAwait(false);
         _plugins.Add(new HostedPlugin(entry.Id!, loader));
         EntryInit?.Invoke(this, new EntryInitEventArgs(entry)); // 统一加载入口（F9）
     }

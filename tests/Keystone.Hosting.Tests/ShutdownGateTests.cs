@@ -12,7 +12,7 @@ public class ShutdownGateTests
     private static KeystoneHostOptions Options() => new()
     {
         ManifestProvider = _ => new PluginManifest("p", "1.0.0", "P.cs", ["cordis-runtime"], [], []),
-        SourceProvider = _ => new PluginSource("p", ConfigInjectionTests.ConfigAwareSource),
+        SourceProvider = _ => new PluginSource("p", ConfigInjectionTests.Source("ShutdownGatePlugin")),
     };
 
     [Fact]

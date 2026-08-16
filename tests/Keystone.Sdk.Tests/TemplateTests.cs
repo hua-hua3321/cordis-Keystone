@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Keystone.Runtime.Context;
 using Keystone.Runtime.Plugins.Lifecycle;
 using Keystone.Runtime.Plugins.Loading;
 using Keystone.Runtime.Plugins.Manifest;
@@ -33,7 +34,7 @@ public class TemplateTests
             await using var loader = await PluginLoader.CreateAsync(
                 new PluginSource("myplugin", source),
                 manifest,
-                new ServiceRegistry(),
+                new InMemoryServiceDiscovery(new KeyedServiceStore()),
                 id => new Runtime.Context.ContextFacade(id));
 
             Assert.Equal(PluginLifecycleState.Active, loader.Runtime.State);

@@ -16,7 +16,8 @@ public sealed class PluginRuntime : IAsyncDisposable
 {
     private readonly PluginManifest _manifest;
     private readonly Func<IPluginContext, IPlugin> _pluginFactory;
-    private readonly IServiceRegistry _registry;
+    private readonly IServiceDiscovery _discovery;
+    private readonly IReadOnlyDictionary<string, string>? _isolateMap; // 名 → realm（门控域视图；与 context 工厂同源）
     private readonly Func<string, IPluginContext> _contextFactory;
     private readonly IReadOnlyDictionary<string, object?> _config;
     private readonly TimeSpan _quiesceTimeout;
@@ -34,8 +35,9 @@ public sealed class PluginRuntime : IAsyncDisposable
     public PluginRuntime(
         PluginManifest manifest,
         Func<IPluginContext, IPlugin> pluginFactory,
-        IServiceRegistry registry,
+        IServiceDiscovery discovery,
         Func<string, IPluginContext> contextFactory,
+        IReadOnlyDictionary<string, string>? isolateMap = null,
         IReadOnlyDictionary<string, object?>? config = null,
         TimeSpan? quiesceTimeout = null,
         TimeSpan? dependencyTimeout = null,
@@ -43,13 +45,14 @@ public sealed class PluginRuntime : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(pluginFactory);
-        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(discovery);
         ArgumentNullException.ThrowIfNull(contextFactory);
 
         _manifest = manifest;
         _pluginFactory = pluginFactory;
-        _registry = registry;
+        _discovery = discovery;
         _contextFactory = contextFactory;
+        _isolateMap = isolateMap;
         _config = config ?? new Dictionary<string, object?>(StringComparer.Ordinal);
         _quiesceTimeout = quiesceTimeout ?? new KeystoneSettings().QuiesceTimeout;
         _dependencyTimeout = dependencyTimeout ?? new KeystoneSettings().DependencyWaitTimeout;
@@ -57,21 +60,32 @@ public sealed class PluginRuntime : IAsyncDisposable
 
         // 依赖门控（ADR-0007 决策 3）：依赖消失 → 卸载；依赖重现 → 自动重启（G-C2 re-arm）。
         // 订阅保持整个 runtime 生命周期（StopCoreAsync 不销毁，DisposeAsync 才清理）。
-        _dependencySubscription = registry.Subscribe(args =>
+        // 批量变更键（可用 = 值存在的投影）：命中 inject 名 → 重评（不信任投递时刻的可用性快照，消除竞态）
+        _dependencySubscription = discovery.Subscribe(keys =>
         {
-            if (!manifest.Inject.Contains(args.ServiceName, StringComparer.Ordinal))
+            var relevant = false;
+            foreach (var key in keys)
+            {
+                if (manifest.Inject.Contains(key.Name, StringComparer.Ordinal))
+                {
+                    relevant = true;
+                    break;
+                }
+            }
+
+            if (!relevant)
             {
                 return;
             }
 
-            if (args.Available && State is PluginLifecycleState.Disposed or PluginLifecycleState.Unloading)
+            if (DependenciesSatisfied() && State is PluginLifecycleState.Disposed or PluginLifecycleState.Unloading)
             {
-                // G-C2：依赖重现 → 自动重启（对齐 Cordis epoch 驱动）
+                // G-C2：依赖重现（值回到 store）→ 自动重启（对齐 Cordis epoch 驱动）
                 _ = StartAsync();
             }
-            else if (!args.Available && State == PluginLifecycleState.Active)
+            else if (!DependenciesSatisfied() && State == PluginLifecycleState.Active)
             {
-                // 依赖消失 → 依赖方走完整卸载闸门
+                // 依赖消失（值删）→ 依赖方走完整卸载闸门
                 _ = StopCoreAsync();
             }
         });
@@ -259,14 +273,26 @@ public sealed class PluginRuntime : IAsyncDisposable
         }
 
         await plugin.InitializeAsync(context, _config).ConfigureAwait(false);
-        foreach (var service in _manifest.Provides)
+
+        // 18 §2 CA-1：值即注册——manifest.provides 必须 init 期兑现（可用 = 值存在）。
+        // 声明未 Provide → 明确 FAILED（点名服务），消灭"门控放行但 Get 落空"静默晚失败。
+        var missing = _manifest.Provides
+            .Where(service => !_discovery.IsAvailable(service, Realm(service)))
+            .ToList();
+        if (missing.Count > 0)
         {
-            _registry.Register(service, _manifest.Id);
+            throw new KeystoneException(
+                ErrorCode.LifecycleLoadFailed,
+                $"plugin '{_manifest.Id}' declared provides [{string.Join(", ", missing)}] but did not Provide them during initialization");
         }
     }
 
     private bool DependenciesSatisfied()
-        => _manifest.Inject.All(service => _registry.IsAvailable(service));
+        => _manifest.Inject.All(service => _discovery.IsAvailable(service, Realm(service)));
+
+    /// <summary>门控域视图（18 §2 CA-1）：isolateMap 命中 → 该域；否则 ""（默认共享）。与 context 工厂注入的 map 同源等价。</summary>
+    private string Realm(string serviceName)
+        => _isolateMap is not null && _isolateMap.TryGetValue(serviceName, out var realm) ? realm : string.Empty;
 
     /// <summary>DC-5：等待依赖；超时 → FAILED（ADR-0007：不无限 PENDING）。返回 false = 已置 FAILED。</summary>
     private async Task<bool> AwaitDependenciesOrFailAsync()
@@ -313,7 +339,7 @@ public sealed class PluginRuntime : IAsyncDisposable
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         IDisposable? subscription = null;
-        subscription = _registry.Subscribe(_ =>
+        subscription = _discovery.Subscribe(_ =>
         {
             if (DependenciesSatisfied())
             {
@@ -341,7 +367,7 @@ public sealed class PluginRuntime : IAsyncDisposable
             throw new KeystoneException(
                 ErrorCode.GatingDependencyTimeout,
                 $"plugin '{_manifest.Id}' dependency wait timed out after {_dependencyTimeout.TotalSeconds}s: "
-                + string.Join(", ", _manifest.Inject.Where(s => !_registry.IsAvailable(s))));
+                + string.Join(", ", _manifest.Inject.Where(s => !_discovery.IsAvailable(s, Realm(s)))));
         }
     }
 
@@ -360,16 +386,10 @@ public sealed class PluginRuntime : IAsyncDisposable
             await WithTimeoutAsync(_plugin.DisposeAsync(), "plugin dispose").ConfigureAwait(false);
         }
 
-        // G-C3 值卸载：注销运行期 Provide 的服务值（root/本地 store，属主匹配）
+        // G-C3 值卸载 = 可用性摘除（值即注册，18 §2 CA-1）：dispose 删键 + Removed 通知 → 依赖方重评
         if (_context is not null && _context is ContextFacade facade)
         {
             facade.RemoveOwnedServices();
-        }
-
-        // ③ 摘除服务注册（internal/service 变更 → 依赖方重评）
-        foreach (var service in _manifest.Provides)
-        {
-            _registry.Unregister(service, _manifest.Id);
         }
 
         // G-C2：依赖订阅保留（依赖重现 → 自动重启）；DisposeAsync（真正销毁）才清理

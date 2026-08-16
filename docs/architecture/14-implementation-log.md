@@ -865,7 +865,7 @@ created: 2026-08-15
 | T1 schema 对齐 | isolate 改 Dict<name→true\|"label"> 两档（IsolateKind 三态含 None=显式解除）+ 列表 shim + 序列化 map 回写 + 分层按名合并（None 移除）+ ConfigDiffer 结构键档位编码 + fail-fast | Keystone.Config（EntryOptions/EntryParser/EntrySerializer/EntryTree）+ Keystone.Hosting（ConfigDiffer）+ 08 §3 文档 | 11 个新测试红→绿（map 两档/shim/None/非法形态 fail-fast/roundtrip/按名合并+false 移除/Shared 工厂校验）；全量回归全绿；AOT 0 IL；08 §3 更新；独立提交 | ✔ 2026-08-16 |
 | T2 KeyedServiceStore | ConcurrentDictionary<(name,realm),(value,ownerId)> + Lock 复合写（属主校验+写）+ **出锁批量通知**（scope 合并）+ IsAvailable=ContainsKey + Provide 返回删键 disposer | Keystone.Runtime/Context 新增组件（纯新增不接线） | 17 个新测试红→绿（跨属主拒绝/同属主重绑/删键属主校验/disposer 幂等/跨线程回调不死锁/单键直发/scope 合并/嵌套并入/remove 并入 scope/按域分区/退订停投/16 线程竞写恰一胜者）；全量 362 绿；Runtime AOT 0 IL；提交 | ✔ 2026-08-16 |
 | T3 ContextFacade 接线 | facade 持共享 root store（独立 root 自持）；realm 沿链推导（isolate map 子继承父/子影子覆盖/均无→""）；Resolve 算 realm 查共享 store；Provide 带 realm+disposer 追踪；RemoveOwnedServices 逐 disposer 幂等清理 | ContextFacade/IContext/删 ServiceStore+IServiceStore+ServiceStoreTests + 2 测试调用点 | 14 新测试红→绿（兄弟可见/属主冲突/重绑/幂等清理/私有对无 map 隐藏/双私有隔离/同 label 互见/链继承/子影子覆盖/按名隔离不连坐/同 realm 冲突/GetLazy/独立 root 自持/GatingServiceNotFound）；全量 371 绿；AOT；提交 | ✔ 2026-08-16 |
-| T4 发现投影+门控统一 | IServiceRegistry→IServiceDiscovery 只读投影（IsAvailable(name,realm)+Subscribe）；PluginRuntime 删双注册；门控带 realm；init 后校验 provides⊆owned | ServiceRegistry/IServiceRegistry/PluginRuntime/PluginLoader/KeystoneHost + Runtime/Hosting 测试 | 门控/依赖恢复（G-C2）/DC-5 诊断全绿；provides 未 Provide → 明确 FAILED；全绿；AOT；提交 | ⏳ |
+| T4 发现投影+门控统一 | IServiceRegistry→IServiceDiscovery 只读投影（IsAvailable(name,realm)+Subscribe+AvailableServices）；PluginRuntime 删双注册；门控带 realm；init 后校验 provides⊆owned | ServiceRegistry/IServiceRegistry/PluginRuntime/PluginLoader/KeystoneHost + Runtime/Hosting 测试 | 门控/依赖恢复（G-C2）/DC-5 诊断全绿；provides 未 Provide → 明确 FAILED；全绿；AOT；提交 | ✔ 2026-08-16 |
 | T5 宿主端到端 | 三 context 工厂按 entry.Isolate 算 realm；组谱系 #groupId 推导；isolate 变更触发依赖方重载（F10） | KeystoneHost + Hosting.Tests | e2e：同 label 共享/私有隔离/默认共享；配置改 isolate → 受影响条目重载；全绿；AOT；提交 | ⏳ |
 | T6 总验收 | 全量回归 + 六工程 AOT + 文档回写（02/03/08/09/10/11/14/18/AGENTS）+ CA-1 标记已实施 | 全仓 | 345+N 全绿；AOT 全零 IL；文档同步；frontmatter；最终提交 | ⏳ |
 
@@ -877,6 +877,18 @@ created: 2026-08-15
 | W57-T3-02 | ContextFacade 改接：`_store`（链上共享/独立自持）+ `_isolateMap`（构造注入）+ `ResolveRealm`（链上首个含名 map，均无→""）+ `Resolve` 单键查 + `Provide` 按 realm 写并追踪 disposer + `RemoveOwnedServices` 逐 disposer 幂等；IContext.Services → KeyedServiceStore | 实现 | — | ✅ |
 | W57-T3-03 | 删除旧 ServiceStore/IServiceStore/ServiceStoreTests（值层单源化；覆盖面已由 KeyedServiceStoreTests 承接）；2 处测试调用点补 realm 参数；xUnit1031 改异步 | 清理 | — | ✅ |
 | W57-T3-04 | 全量回归 371/371（Runtime 160→169：+14 新 −5 删）；AOT Runtime 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
+
+#### T4 执行记录（2026-08-16）
+
+| # | 内容 | 方式 | 验证 | 状态 |
+|---|------|------|------|------|
+| W57-T4-01 | 红测试 6 个（DiscoveryGatingTests：值即注册激活/声明未兑现 FAILED 点名/兑现激活/门控域过滤/值消失卸载+值回重启/投影批量通知） | TDD | 构译期红（IServiceDiscovery/isolateMap 不存在，20 错） | ✅ |
+| W57-T4-02 | IServiceDiscovery（2+1 成员 seam）+ InMemoryServiceDiscovery（直投 KeyedServiceStore，零冗余状态）；删 ServiceRegistry/IServiceRegistry/EventArgs | 实现 | — | ✅ |
+| W57-T4-03 | PluginRuntime：删 init 后 Register 循环与 stop 时 Unregister 循环（值即注册）；订阅改批量变更键+命中重评（不信任投递时刻快照）；DependenciesSatisfied/超时诊断带 Realm()；provides⊆owned 聚合校验（缺失全列点名）；ctor 增 isolateMap（门控先于 context 创建） | 实现 | — | ✅ |
+| W57-T4-04 | PluginLoader.CreateAsync/KeystoneHost 接线：host 投影 root store 单例 discovery；17 处测试直构点改投影模式 | 实现 | — | ✅ |
+| W57-T4-05 | scope 冲刷改集合语义（Distinct，对齐 Cordis notify(names[])）——同键增删并入只投一次 | 修复 | 投影批量测试 3→2 项 | ✅ |
+| W57-T4-06 | 修两处既有 flake（暴露于本任务时序变化）：① ConfigInjectionTests 跨 ALC 同名类型改每测试唯一名；② HotReloadTests 跨 ALC 读取改全副本扫描（int 取最大/string Any 断言）——GetAssemblies() 跨 LoadContext 无"最新在后"保证 | 修复 | 各自连续 5-10 次复跑零失败 | ✅ |
+| W57-T4-07 | 全量回归 372/372（Runtime 169→172：+6 新 −3 删；Hosting 54→52：−2 registry 单测，覆盖面由 KeyedServiceStoreTests/投影测试承接）；Runtime+Hosting AOT 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
 
 #### T2 执行记录（2026-08-16）
 

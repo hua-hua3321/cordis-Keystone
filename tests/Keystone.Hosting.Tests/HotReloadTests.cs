@@ -59,7 +59,7 @@ public class HotReloadTests
         // 旧 ALC 已 Unload（loader.DisposeAsync）→ 强制 GC 回收后只剩新 ALC，读到新静态状态
         ForceGc();
         Assert.Equal(1, ReadStaticInt("VersionedPlugin", "BootCount"));
-        Assert.Contains("v1", ReadStaticString("VersionedPlugin", "LastConfig")); // 新 runtime 用原配置重初始化
+        Assert.Contains(ReadStaticStrings("VersionedPlugin", "LastConfig"), c => c?.Contains("v1", StringComparison.Ordinal) ?? false); // 新 runtime 用原配置重初始化
 
         await host.ShutdownAsync();
     }
@@ -79,9 +79,9 @@ public class HotReloadTests
 
         await host.UpdatePluginAsync("hot", new Dictionary<string, object?> { ["mode"] = "v2" });
 
-        // 热更新重载：新 runtime 收到 v2 配置（旧 ALC Unload + GC 后只剩新 ALC）
+        // 热更新重载：新 runtime 收到 v2 配置（新旧 ALC 可能短暂并存——任一副本收到即证明）
         ForceGc();
-        Assert.Contains("v2", ReadStaticString("VersionedPlugin", "LastConfig"));
+        Assert.Contains(ReadStaticStrings("VersionedPlugin", "LastConfig"), c => c?.Contains("v2", StringComparison.Ordinal) ?? false);
         // 配置树已更新
         Assert.Equal("v2", ((Dictionary<string, object?>)host.ResolveEntry("hot").Config!)["mode"]);
 
@@ -118,18 +118,24 @@ public class HotReloadTests
         GC.Collect();
     }
 
+    // 跨 ALC 读取（P57-T4 修既有 flake）：重载后新旧 ALC 短暂并存（ALC.Unload 异步、ForceGc 不保证立即回收），
+    // GetAssemblies() 跨 LoadContext 的枚举顺序并无"最新在后"保证——"Reverse 取第一"会随机命中旧副本。
+    // 改为确定语义：int 取全副本最大（计数只增）；string 取全副本（调用方用 Any 断言——重载语义即"新副本收到过 X"）。
     private static int ReadStaticInt(string typeName, string fieldName)
-        => (int)ReadStaticField(typeName, fieldName);
-
-    private static string? ReadStaticString(string typeName, string fieldName)
-        => (string?)ReadStaticField(typeName, fieldName);
-
-    private static object ReadStaticField(string typeName, string fieldName)
     {
-        // 跨 ALC：重载后新旧 ALC 并存——取最新加载 ALC 的实例（Reverse 第一个）
-        // （int 取最大兜底：若最新 ALC 类型未找到则用计数最高的）
-        object? best = null;
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies().Reverse())
+        var values = ReadAllStaticFields(typeName, fieldName);
+        return values.Count == 0
+            ? throw new InvalidOperationException($"{typeName}.{fieldName} not found")
+            : values.Max(v => (int)(v ?? 0));
+    }
+
+    private static List<string?> ReadStaticStrings(string typeName, string fieldName)
+        => ReadAllStaticFields(typeName, fieldName).Select(v => (string?)v).ToList();
+
+    private static List<object?> ReadAllStaticFields(string typeName, string fieldName)
+    {
+        var values = new List<object?>();
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
         {
             var t = asm.GetTypes().FirstOrDefault(x => x.Name == typeName);
             if (t is null)
@@ -143,10 +149,9 @@ public class HotReloadTests
                 continue;
             }
 
-            best = field.GetValue(null);
-            break; // 最新加载 ALC 优先
+            values.Add(field.GetValue(null));
         }
 
-        return best ?? throw new InvalidOperationException($"{typeName}.{fieldName} not found");
+        return values;
     }
 }

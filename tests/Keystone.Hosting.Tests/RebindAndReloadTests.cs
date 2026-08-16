@@ -1,6 +1,5 @@
 using Keystone.Runtime.Plugins.Loading;
 using Keystone.Runtime.Plugins.Manifest;
-using Keystone.Runtime.Plugins.Services;
 
 namespace Keystone.Hosting.Tests;
 
@@ -10,28 +9,6 @@ namespace Keystone.Hosting.Tests;
 /// </summary>
 public class RebindAndReloadTests
 {
-    [Fact]
-    public void Duplicate_register_by_other_provider_throws()
-    {
-        var registry = new ServiceRegistry();
-        registry.Register("fs", "plugin-a");
-
-        // 另一提供者注册同名 → 报错（rebind 语义，DC-6）
-        Assert.Throws<Keystone.Core.Errors.KeystoneException>(() => registry.Register("fs", "plugin-b"));
-        Assert.True(registry.IsAvailable("fs")); // 原注册保持
-    }
-
-    [Fact]
-    public void Same_provider_re_register_after_unregister_succeeds()
-    {
-        var registry = new ServiceRegistry();
-        registry.Register("fs", "plugin-a");
-        registry.Unregister("fs", "plugin-a");
-
-        registry.Register("fs", "plugin-a"); // 卸载后重新注册：允许（重启路径）
-        Assert.True(registry.IsAvailable("fs"));
-    }
-
     [Fact]
     public async Task Reload_plugin_keeps_service_available()
     {

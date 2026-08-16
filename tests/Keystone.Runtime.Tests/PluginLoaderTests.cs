@@ -1,4 +1,5 @@
 using Keystone.Runtime.Plugins.Lifecycle;
+using Keystone.Runtime.Context;
 using Keystone.Runtime.Plugins.Loading;
 using Keystone.Runtime.Plugins.Manifest;
 using Keystone.Runtime.Plugins.Services;
@@ -16,7 +17,7 @@ public class PluginLoaderTests
         await using var loader = await PluginLoader.CreateAsync(
             new PluginSource("sample", SampleSources.V1),
             SampleManifest(),
-            new ServiceRegistry(),
+            new InMemoryServiceDiscovery(new KeyedServiceStore()),
             id => new Context.ContextFacade(id));
 
         Assert.NotNull(loader.Runtime);
@@ -41,7 +42,7 @@ public class PluginLoaderTests
         var loader = await PluginLoader.CreateAsync(
             new PluginSource("sample", SampleSources.V1),
             SampleManifest(),
-            new ServiceRegistry(),
+            new InMemoryServiceDiscovery(new KeyedServiceStore()),
             id => new Context.ContextFacade(id));
 
         await loader.DisposeAsync();
@@ -54,7 +55,7 @@ public class PluginLoaderTests
         var loader = await PluginLoader.CreateAsync(
             new PluginSource("sample", SampleSources.V1),
             SampleManifest(),
-            new ServiceRegistry(),
+            new InMemoryServiceDiscovery(new KeyedServiceStore()),
             id => new Context.ContextFacade(id));
         await using var _ = loader;
 
@@ -78,7 +79,7 @@ public class PluginLoaderTests
             await PluginLoader.CreateAsync(
                 new PluginSource("broken", "public class {"),
                 SampleManifest(),
-                new ServiceRegistry(),
+                new InMemoryServiceDiscovery(new KeyedServiceStore()),
                 id => new Context.ContextFacade(id)));
     }
 

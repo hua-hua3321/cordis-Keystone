@@ -11,14 +11,16 @@ namespace Keystone.Hosting.Tests;
 [Collection("ConfigInjection")]
 public class ConfigInjectionTests
 {
-    public const string ConfigAwareSource = """
+    // 每测试唯一类型名：ALC 内同名类型经 AppDomain 反向枚举无"最新在后"保证（跨 LoadContext 顺序未定义），
+    // 唯一名使 ReadStaticString 恒命中本测试的程序集（P57-T4 修既有 flake）
+    public static string Source(string typeName) => $$"""
         using System;
         using System.Threading.Tasks;
         using System.Collections.Generic;
         using Keystone.Runtime.Context;
         using Keystone.Runtime.Plugins.Lifecycle;
 
-        public sealed class ConfigAwarePlugin : IPlugin
+        public sealed class {{typeName}} : IPlugin
         {
             public static IReadOnlyDictionary<string, object?>? Received;
             public static string? ConfigJson;
@@ -34,26 +36,24 @@ public class ConfigInjectionTests
         }
         """;
 
-    private static readonly PluginManifest ConfigManifest =
-        new("configurable", "1.0.0", "ConfigAware.cs", ["cordis-runtime"], [], []);
-
     private static readonly ConfigSchema TestSchema = new(
     [
         new ConfigField("root", Required: true, Default: null),
         new ConfigField("mode", Required: false, Default: "read-only"),
     ]);
 
-    private static KeystoneHostOptions Options(ConfigSchema? schema = null) => new()
+    private static KeystoneHostOptions Options(string typeName, ConfigSchema? schema = null) => new()
     {
-        ManifestProvider = _ => ConfigManifest,
-        SourceProvider = _ => new PluginSource("configurable", ConfigAwareSource),
+        ManifestProvider = _ => new PluginManifest("configurable", "1.0.0", "ConfigAware.cs", ["cordis-runtime"], [], []),
+        SourceProvider = _ => new PluginSource("configurable", Source(typeName)),
         ConfigSchemaProvider = schema is null ? _ => null : _ => schema,
     };
 
     [Fact]
     public async Task Plugin_receives_validated_config_with_defaults_applied()
     {
-        await using var host = new KeystoneHost(Options(TestSchema));
+        const string type = "DefaultsPlugin";
+        await using var host = new KeystoneHost(Options(type, TestSchema));
 
         await host.StartAsync("""
             - id: configurable
@@ -64,8 +64,8 @@ public class ConfigInjectionTests
 
         Assert.Equal(Keystone.Runtime.Plugins.Lifecycle.PluginLifecycleState.Active, host.GetPluginState("configurable"));
         // 默认值补齐：mode 未提供 → "read-only"；root 原样
-        Assert.Contains("read-only", ReadStaticString("ConfigAwarePlugin", "ConfigJson"));
-        Assert.Contains("/data", ReadStaticString("ConfigAwarePlugin", "ConfigJson"));
+        Assert.Contains("read-only", ReadStaticString(type, "ConfigJson"));
+        Assert.Contains("/data", ReadStaticString(type, "ConfigJson"));
 
         await host.ShutdownAsync();
     }
@@ -73,7 +73,8 @@ public class ConfigInjectionTests
     [Fact]
     public async Task Missing_required_field_fails_fast()
     {
-        await using var host = new KeystoneHost(Options(TestSchema));
+        const string type = "MissingFieldPlugin";
+        await using var host = new KeystoneHost(Options(type, TestSchema));
 
         // root 必填但缺失 → schema 校验失败 → 插件 FAILED（fail-fast，对齐 Cordis）
         await host.StartAsync("""
@@ -92,7 +93,8 @@ public class ConfigInjectionTests
     public async Task Plugin_without_schema_receives_raw_config()
     {
         // 无 schema 声明 → 不校验，原始 config 直传（未接 schema 的插件不受影响）
-        await using var host = new KeystoneHost(Options(schema: null));
+        const string rawType = "RawConfigPlugin";
+        await using var host = new KeystoneHost(Options(rawType, schema: null));
 
         await host.StartAsync("""
             - id: configurable
@@ -102,7 +104,7 @@ public class ConfigInjectionTests
             """);
 
         Assert.Equal(Keystone.Runtime.Plugins.Lifecycle.PluginLifecycleState.Active, host.GetPluginState("configurable"));
-        Assert.Contains("42", ReadStaticString("ConfigAwarePlugin", "ConfigJson"));
+        Assert.Contains("42", ReadStaticString(rawType, "ConfigJson"));
 
         await host.ShutdownAsync();
     }

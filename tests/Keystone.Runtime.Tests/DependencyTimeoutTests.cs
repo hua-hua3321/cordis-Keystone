@@ -22,11 +22,11 @@ public class DependencyTimeoutTests
     [Fact]
     public async Task Missing_dependency_times_out_to_failed()
     {
-        var registry = new ServiceRegistry();
+        var discovery = new InMemoryServiceDiscovery(new KeyedServiceStore());
         var runtime = new PluginRuntime(
             new PluginManifest("p", "1.0.0", "P.cs", ["cordis-runtime"], [], ["never-available"]),
             _ => new FakePlugin(),
-            registry,
+            discovery,
             _ => new ContextFacade("p"),
             dependencyTimeout: TimeSpan.FromMilliseconds(200)); // 短超时
 
@@ -44,11 +44,11 @@ public class DependencyTimeoutTests
     [Fact]
     public async Task Dependency_appearing_before_timeout_still_activates()
     {
-        var registry = new ServiceRegistry();
+        var store = new KeyedServiceStore();
         var runtime = new PluginRuntime(
             new PluginManifest("p", "1.0.0", "P.cs", ["cordis-runtime"], [], ["late-dep"]),
             _ => new FakePlugin(),
-            registry,
+            new InMemoryServiceDiscovery(store),
             _ => new ContextFacade("p"),
             dependencyTimeout: TimeSpan.FromSeconds(5));
 
@@ -56,7 +56,7 @@ public class DependencyTimeoutTests
         Assert.Equal(PluginLifecycleState.Pending, runtime.State);
 
         await Task.Delay(50);
-        registry.Register("late-dep", "provider"); // 超时前出现
+        store.Provide("late-dep", string.Empty, new object(), "provider"); // 超时前值出现（即注册）
 
         await start;
         Assert.Equal(PluginLifecycleState.Active, runtime.State); // 正常激活
