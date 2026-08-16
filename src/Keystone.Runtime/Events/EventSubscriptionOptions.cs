@@ -14,6 +14,13 @@ public sealed record EventSubscriptionOptions
     /// <summary>true = 跳过 scope 过滤，任何分发都投递（对齐 Cordis global: true）。</summary>
     public bool Global { get; init; }
 
+    /// <summary>
+    /// D-8（19 号审计 EV-1，对齐 events.ts:159-176）：缺省 false = 广播（跨 scope 可收——
+    /// Cordis ctx.on 注册的监听不带 filter 即全收）；显式 true = 祖先链过滤
+    /// （监听者须是发布者的祖先/自身才投递——等价 Cordis internal/service 显式携带 isolate filter）。
+    /// </summary>
+    public bool ScopeFilter { get; init; }
+
     /// <summary>true = 注册到监听列表头部（prepend，M7）。</summary>
     public bool Prepend { get; init; }
 

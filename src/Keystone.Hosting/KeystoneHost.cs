@@ -408,6 +408,7 @@ public sealed class KeystoneHost : IAsyncDisposable
             throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"parent group not found: {newParent}");
         }
 
+        var (sourceParent, sourceIndex) = LocateEntry(_tree, id); // P2-8：原位记账
         RemoveFromTree(_tree, id);
         try
         {
@@ -415,7 +416,8 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
         catch (Exception)
         {
-            InsertEntry(_tree, entry, null, null); // 回滚到根（F5 移动失败回滚）
+            // P2-8（19 号审计 LD-18c，修复"回滚到根"）：回插原组原下标——与报错语义一致
+            InsertEntry(_tree, entry, sourceParent, sourceIndex >= 0 ? sourceIndex : null);
             throw;
         }
 
@@ -423,22 +425,27 @@ public sealed class KeystoneHost : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>嵌套 id 解析（`:` 分隔跨子树，对齐 EntryTree.resolve）。</summary>
+    /// <summary>
+    /// D-3（19 号审计 LD-8，对齐 tree.ts:114-124）：<see cref="UpdateEntryAsync"/> 的显式根哨兵——
+    /// parent 传此值 = 移到根；缺省（null）= 保持现父不动（修复前缺省被挪根）。
+    /// </summary>
+    public const string RootParent = "";
+
+    /// <summary>嵌套 id 解析（`:` 分隔跨子树任意深度，P2-6 对齐 tree.ts:76-87 逐段下钻）。</summary>
     public EntryOptions ResolveEntry(string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
-        var parts = id.Split(':', 2);
-        var root = FindEntry(_tree, parts[0])
+        var segments = id.Split(':');
+        var current = FindEntry(_tree, segments[0])
             ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
-        if (parts.Length == 1)
+        for (var depth = 1; depth < segments.Length; depth++)
         {
-            return root;
+            current = FindEntry(current.Group ?? [], segments[depth])
+                ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
         }
 
-        var child = FindEntry(root.Group ?? [], parts[1])
-            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
-        return child;
+        return current;
     }
 
     /// <summary>当前生效配置树（对齐 harness --dump-config）。</summary>
@@ -551,15 +558,22 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         var current = FindEntry(_tree, id)
             ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
-        if (parent is not null && FindEntry(_tree, parent) is not { } parentEntry)
+
+        // D-3（对齐 tree.ts:114-124）：缺省 = 保持现父；显式 RootParent("") = 根；否则校验目标组
+        var (sourceParent, sourceIndex) = LocateEntry(_tree, id);
+        var effectiveParent = parent is null
+            ? sourceParent
+            : string.Equals(parent, RootParent, StringComparison.Ordinal) ? null : parent;
+        if (effectiveParent is not null && FindEntry(_tree, effectiveParent) is not { } parentEntry)
         {
-            throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"parent group not found: {parent}");
+            throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"parent group not found: {effectiveParent}");
         }
 
-        var updated = options with { Id = id };
+        // D-2（对齐 entry.ts:146-154 patch 语义）：逐字段合并——提供的覆盖、缺省保留
+        //（修复前整条目替换：未传 Name/Inject/Isolate 被清空 → 结构键误判变化走冷路径）
+        var updated = MergeEntryFields(current, options with { Id = id });
         var structuralChanged = !string.Equals(StructuralKeyOf(current), StructuralKeyOf(updated), StringComparison.Ordinal);
-        var (sourceParent, sourceIndex) = LocateEntry(_tree, id);
-        var parentChanged = !string.Equals(sourceParent, parent, StringComparison.Ordinal);
+        var parentChanged = !string.Equals(sourceParent, effectiveParent, StringComparison.Ordinal);
 
         // 移动记账：(源父 id, 原下标)——失败回插精确原位
         var moved = false;
@@ -568,7 +582,7 @@ public sealed class KeystoneHost : IAsyncDisposable
             RemoveFromTree(_tree, id);
             try
             {
-                InsertEntry(_tree, updated, parent, position);
+                InsertEntry(_tree, updated, effectiveParent, position);
                 moved = true;
             }
             catch (Exception)
@@ -596,6 +610,23 @@ public sealed class KeystoneHost : IAsyncDisposable
             throw;
         }
     }
+
+    /// <summary>
+    /// D-2（19 号审计 LD-7，对齐 entry.ts:146-154）：逐字段合并——提供的覆盖、缺省保留。
+    /// Config 提供即整体替换（空 dict = 显式清空出口）；Name/Disabled null 保留；
+    /// Inject/Isolate 空集合保留（引用集合无法区分"缺省"与"清空"——清空走 Config 同理显式传值）。
+    /// </summary>
+    private static Keystone.Config.Entries.EntryOptions MergeEntryFields(
+        Keystone.Config.Entries.EntryOptions current, Keystone.Config.Entries.EntryOptions patch)
+        => current with
+        {
+            Name = patch.Name ?? current.Name,
+            Config = patch.Config ?? current.Config,
+            Disabled = patch.Disabled ?? current.Disabled,
+            Inject = patch.Inject.Count > 0 ? patch.Inject : current.Inject,
+            Isolate = patch.Isolate.Count > 0 ? patch.Isolate : current.Isolate,
+            Group = patch.Group ?? current.Group,
+        };
 
     /// <summary>D-4（19 号审计 LD-9，对齐 entry.ts:232-243）：失败用旧条目重启插件
     /// （修复前只复原树不复原运行时 → 失败后插件处于已卸载态）。树已复原，尽力而为——

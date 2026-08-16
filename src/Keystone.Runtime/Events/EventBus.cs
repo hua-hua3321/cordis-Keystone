@@ -258,8 +258,9 @@ public sealed class EventBus : IEventBus
     }
 
     /// <summary>
-    /// G15 过滤：监听者是发布者（publisher）的祖先/自身才投递；global 跳过。
-    /// 纯总线场景（无 context 上下文，publisher/scope 均 null）→ 放行。
+    /// D-8（19 号审计 EV-1，对齐 events.ts:159-176）：缺省广播（无 filter 即投递——
+    /// Cordis hook.global || !filter || filter(ctx)）；显式 ScopeFilter 才做祖先链过滤
+    /// （监听者是发布者的祖先/自身才投递，等价 internal/service 的 isolate filter）。
     /// </summary>
     /// <summary>
     /// G-C4（对齐 Cordis isBailed，events.ts:13-15）：决策值判定——null/false 不算决策（不短路），
@@ -270,9 +271,9 @@ public sealed class EventBus : IEventBus
 
     private static bool ShouldDispatch(HandlerEntry entry, IContext? publisher)
     {
-        if (entry.Options.Global)
+        if (entry.Options.Global || !entry.Options.ScopeFilter)
         {
-            return true;
+            return true; // global 跳过过滤；缺省广播（D-8）
         }
 
         var listenerScope = entry.Options.Scope;

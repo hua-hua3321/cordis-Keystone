@@ -33,7 +33,87 @@ public static class EntryParser
         var visited = interpolator is null ? null : new HashSet<string>(StringComparer.Ordinal);
         var entries = sequence.Children.Select(node => ParseEntry(node, interpolator, visited)).ToList();
         ValidateNoDuplicateIds(entries);
-        return entries;
+        // P2-7（19 号审计 LD-18b，对齐 Cordis ensureId）：无 id 条目自动分配稳定 id——
+        // 分层合并与 diff 均以 id 为主键（修复前分层丢弃 + diff ToDictionary(null) 崩）
+        return EnsureIds(entries);
+    }
+
+    /// <summary>
+    /// P2-7：无 id 条目自动分配（递归含组内）。确定性策略：<c>entry-{序号}</c>（全树深度优先计数，
+    /// 与 Name 解耦——路径名等含非法程序集字符，不作 id）；与既有 id 撞车时追加 <c>#2/#3...</c>。
+    /// 同一文件重解析序号稳定（watcher diff 不会误判增删）。
+    /// </summary>
+    private static IReadOnlyList<EntryOptions> EnsureIds(IReadOnlyList<EntryOptions> entries)
+    {
+        var taken = new HashSet<string>(StringComparer.Ordinal);
+        CollectIds(entries, taken);
+        var ordinal = 0;
+        return EnsureIdsCore(entries, taken, ref ordinal);
+    }
+
+    private static void CollectIds(IReadOnlyList<EntryOptions> entries, HashSet<string> taken)
+    {
+        foreach (var entry in entries)
+        {
+            if (entry.Id is { } id)
+            {
+                taken.Add(id);
+            }
+
+            if (entry.Group is { } children)
+            {
+                CollectIds(children, taken);
+            }
+        }
+    }
+
+    private static IReadOnlyList<EntryOptions> EnsureIdsCore(
+        IReadOnlyList<EntryOptions> entries, HashSet<string> taken, ref int ordinal)
+    {
+        List<EntryOptions>? rewritten = null;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            var children = entry.Group is { } group
+                ? EnsureIdsCore(group, taken, ref ordinal)
+                : null;
+            EntryOptions? updated = null;
+            if (entry.Id is null)
+            {
+                var candidate = UniqueName($"entry-{ordinal}", taken);
+                ordinal++;
+                updated = (children is null ? entry : entry with { Group = children }) with { Id = candidate };
+            }
+            else if (children is not null)
+            {
+                updated = entry with { Group = children };
+            }
+
+            if (updated is not null)
+            {
+                rewritten ??= [.. entries];
+                rewritten[i] = updated;
+            }
+        }
+
+        return rewritten ?? entries;
+    }
+
+    private static string UniqueName(string baseName, HashSet<string> taken)
+    {
+        if (taken.Add(baseName))
+        {
+            return baseName;
+        }
+
+        for (var n = 2; ; n++)
+        {
+            var candidate = $"{baseName}#{n}";
+            if (taken.Add(candidate))
+            {
+                return candidate;
+            }
+        }
     }
 
     /// <summary>

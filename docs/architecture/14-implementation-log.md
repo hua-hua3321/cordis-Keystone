@@ -1068,6 +1068,19 @@ created: 2026-08-15
 | T9 root effects 收敛（P2-14） | ShutdownAsync 增 _rootContext.DisposeEffectsAsync()（宿主自注册资源不再进程级泄漏） | KeystoneHost.cs | 代码路径（回归覆盖） | ✔ |
 | T10 回归 | 全量 6 套件 | 新增 7 测试；MA0051 拆分 WireDependencyRearm/CleanupCancelledStartAsync/TransitionToFailedAsync/QuiesceAllPluginsAsync | 438/438；Hosting AOT 零 IL 警告 | ✔ |
 
+#### W67-01 P67：API 语义对齐批（19 §3/§4：D-2/D-3/D-8 + P2-6/7/8 + P2-18）
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| T1 UpdateEntry 字段合并（D-2） | MergeEntryFields——提供的覆盖/缺省保留（Name/Disabled null 保留；Inject/Isolate 空集保留；Config 提供即整体替换=显式清空出口）；修复前整条目替换：未传字段被清空 + 结构键误判走冷路径 | KeystoneHost.cs | UpdateEntry_merges_fields_unprovided_keep_current（reloads=0） | ✔ |
+| T2 parent 缺省不动（D-3） | RootParent("") 显式根哨兵 + 缺省 null = 保持现父（effectiveParent 推导）；修复前组内条目不带 parent 调用被挪根 | KeystoneHost.cs | UpdateEntry_parent_default_keeps_current_group + explicit_root_sentinel_moves_to_root | ✔ |
+| T3 事件广播缺省（D-8） | EventSubscriptionOptions.ScopeFilter（缺省 false=广播——对齐 events.ts:159-176 hook.global \|\| !filter 即投递）；显式 true 才做祖先链过滤（等价 internal/service 显式 isolate filter） | EventSubscriptionOptions.cs/EventBus.cs/ContextFacadeTests | EventBroadcastDefaultTests 3 例 + 旧 G15 兄弟测试改废为广播+显式过滤双断言 | ✔ |
+| T4 嵌套 id 任意深度（P2-6） | ResolveEntry 逐段下钻（`:` split 全段循环）；修复前 Split(':',2) 仅两级 | KeystoneHost.cs | ResolveEntry_walks_arbitrary_depth（三级） | ✔ |
+| T5 无 id 条目 ensureId（P2-7） | EntryParser.Parse 尾部 EnsureIds——entry-{序号} 确定性分配（与 Name 解耦防路径字符入程序集名；撞车 #2/#3；同文件重解析稳定）；修复前分层丢弃 + diff ToDictionary(null) 崩 | EntryParser.cs | No_id_entries_get_generated_ids | ✔ |
+| T6 MoveEntry 精确回滚（P2-8） | LocateEntry 原位记账 (源组,原下标)，失败回插原位；修复前回滚到根与报错矛盾 | KeystoneHost.cs | MoveEntry_failure_restores_exact_original_position | ✔ |
+| T7 ConsoleSink 文档修正（P2-18） | 05 §5 承诺改"核心默认零 provider（内存缓冲），Console/File/exporter 均 opt-in"——对齐 Cordis 核心（console 属生态包） | 05-reliability.md | 文档校验通过 | ✔ |
+| T8 回归 | 全量 6 套件 | 新增 9 测试（Hosting 6 + Runtime 3） | 447/447；Hosting AOT 零 IL 警告 | ✔ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |

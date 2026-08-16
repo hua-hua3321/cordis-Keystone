@@ -76,7 +76,9 @@ CancellationToken 贯穿全链（接口第一版就带 token，后期加是破�
 
 - **命名规则**：`ILoggerFactory.CreateLogger(category)`，category = `{能力域}/{插件 ID}`（对齐 Cordis 按 fiber 名自动命名，07 G11）——按插件过滤日志的前提
 - **级别覆盖**：每插件经 `IOptions<T>` 命名选项覆盖 category 的 name/level（对齐 Cordis intercept 配置，07 G12）
-- **provider 接线清单**：Console（默认）+ File（滚动，可选）+ 结构化 exporter（可选），均为 `ILoggerProvider` 实现
+- **provider 接线清单**（P2-18 修正，对齐 Cordis 核心：核心默认仅内存缓冲，console 属生态包 opt-in）：
+  默认零 provider（`ILoggerFactory` 空转缓冲，测试/嵌入方安静）；Console / File（滚动）/ 结构化 exporter
+  均为可选 `ILoggerProvider`，由嵌入方经 `ServiceOptions` 显式接线
 - **结构化日志记录模型**（对齐 Cordis Message 结构 / ADR-0004 显式序列化契约）：
 
   | 字段 | 类型 | 说明 |

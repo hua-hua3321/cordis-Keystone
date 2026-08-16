@@ -42,17 +42,25 @@ public class ContextFacadeTests
     }
 
     [Fact]
-    public async Task Sibling_scope_listener_does_not_receive_event()
+    public async Task Sibling_listener_receives_event_by_default_and_filters_when_explicit()
     {
+        // D-8（19 号审计 EV-1）：缺省广播（兄弟可收）；显式 ScopeFilter 才回到祖先链过滤
         var root = new ContextFacade("root", null);
         var left = new ContextFacade("left", root);
         var right = new ContextFacade("right", root);
-        var received = 0;
-        left.Events.Subscribe<Ping>(_ => received++, new EventSubscriptionOptions { Scope = left });
+        var broadcast = 0;
+        var filtered = 0;
+        left.Events.Subscribe<Ping>(_ => broadcast++); // 缺省 = 广播
+        left.Events.Subscribe<Ping>(_ => filtered++, new EventSubscriptionOptions
+        {
+            Scope = left,
+            ScopeFilter = true, // 显式过滤（旧 G15 语义 opt-in）
+        });
 
         await right.Events.EmitAsync(new Ping("x"), right);
 
-        Assert.Equal(0, received); // 兄弟非祖先 → 不投递
+        Assert.Equal(1, broadcast); // 兄弟可收（D-8 广播）
+        Assert.Equal(0, filtered); // 显式过滤：兄弟非祖先 → 不投递
     }
 
     [Fact]
