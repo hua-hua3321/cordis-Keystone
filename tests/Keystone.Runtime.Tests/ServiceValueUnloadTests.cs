@@ -54,7 +54,7 @@ public class ServiceValueUnloadTests
         await runtime.StopAsync(); // 显式卸载
 
         Assert.True(root.TryGet<object>("dynamic") is null, "卸载后运行期 Provide 的值应注销（不再陈旧）");
-        Assert.False(providerCtx?.Services.TryGet<object>("dynamic") is not null, "本地 store 也应注销");
+        Assert.False(providerCtx?.Services.TryGet<object>("dynamic", string.Empty) is not null, "共享 store 应注销");
 
         await runtime.DisposeAsync();
     }

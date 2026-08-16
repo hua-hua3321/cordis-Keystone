@@ -142,7 +142,7 @@ public class CapabilityDomainTests
     private static TaskResultEnvelope Ok(Keystone.Runtime.Context.ContextFacade ctx) => new()
     {
         TaskId = Guid.NewGuid(),
-        Succeeded = ctx.Services.TryGet<object>("fs") is not null,
+        Succeeded = ctx.Services.TryGet<object>("fs", string.Empty) is not null,
         Type = TaskResultType.Completed,
     };
 }

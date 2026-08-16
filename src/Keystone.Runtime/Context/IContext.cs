@@ -27,7 +27,7 @@ public interface IContext
     IEventBus Events { get; }
 
     /// <summary>服务存储（rebind/属主校验，03 §2.1/§2.3）。</summary>
-    IServiceStore Services { get; }
+    KeyedServiceStore Services { get; }
 
     /// <summary>命名日志（M2；category 缺省 = 上下文名）。</summary>
     ILogger GetLogger(string? name = null);

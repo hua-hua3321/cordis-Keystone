@@ -14,12 +14,16 @@ public sealed class ContextFacade : IPluginContext, IContext
 {
     private CancellationToken _requestCancellationToken; // DC-14：请求 CT 槽（actor 串行循环内设置——单写者无竞争）
 
-    private readonly ServiceStore _services = new();
+    // 值层唯一事实源（18 §2 CA-1）：链上共享（子复用 root 的实例；独立 root 自持一份）
+    private readonly KeyedServiceStore _store;
+    // isolate map（名 → realm）：沿链继承（子含名 → 用子值 = 影子覆盖；均无 → "" 默认共享）
+    private readonly IReadOnlyDictionary<string, string>? _isolateMap;
+    // 本 context 提供的服务（名, realm, 删键 disposer）：RemoveOwnedServices 逐个 dispose（幂等）
+    private readonly List<(string Name, string Realm, IDisposable Disposer)> _provides = [];
     private readonly EventBus _events;
     private readonly EffectRegistry _effects = new();
     private readonly ILoggerFactory _loggerFactory;
     private readonly List<IContextInterceptor> _interceptors = [];
-    private readonly HashSet<string> _ownedServices = new(StringComparer.Ordinal);
     private readonly string? _logCategoryPrefix;
 
     public ContextFacade(
@@ -27,11 +31,14 @@ public sealed class ContextFacade : IPluginContext, IContext
         IContext? parent = null,
         ILoggerFactory? loggerFactory = null,
         Keystone.Runtime.Persistence.IEventStore? eventStore = null,
-        string? logCategoryPrefix = null)
+        string? logCategoryPrefix = null,
+        IReadOnlyDictionary<string, string>? isolateMap = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         Name = name;
         Parent = parent;
+        _isolateMap = isolateMap;
+        _store = (parent as ContextFacade)?._store ?? new KeyedServiceStore();
         // DC-20（05 §5 日志命名）：category = {能力域}/{插件 ID}——插件 context 继承 root 的域前缀
         _logCategoryPrefix = logCategoryPrefix
             ?? (parent as ContextFacade)?._logCategoryPrefix; // 子 context 继承（同一能力域）
@@ -53,7 +60,7 @@ public sealed class ContextFacade : IPluginContext, IContext
 
     public IEventBus Events => _events;
 
-    public IServiceStore Services => _services;
+    public KeyedServiceStore Services => _store;
 
     public IContext Context => this;
 
@@ -84,57 +91,54 @@ public sealed class ContextFacade : IPluginContext, IContext
     }
 
     /// <summary>
-    /// 服务解析链（03 §2 作用域链 / ADR-0007 依赖门控）：先查本 scope，再沿父链向上（→ 根）。
-    /// 父链 = 服务级组合（inject 跨插件可见）；isolate 隔离经独立 context 链天然达成（不共享父）。
+    /// 服务解析（18 §2 CA-1）：按本链推导的 realm 查共享 KeyedServiceStore——
+    /// 组合语义（默认共享域 ""）与隔离语义（isolate map 命中 → 私有/命名域）统一为键查。
     /// </summary>
     private T? Resolve<T>(string serviceName)
+        => _store.TryGet<T>(serviceName, ResolveRealm(serviceName));
+
+    /// <summary>
+    /// realm 沿链推导（对齐 Cordis ctx[symbols.isolate] 原型链查找）：自本 context 向上，
+    /// 首个 isolate map 含该服务名的 facade 给出 realm；均无 → ""（默认共享）。
+    /// </summary>
+    private string ResolveRealm(string serviceName)
     {
         for (IContext? scope = this; scope is not null; scope = scope.Parent)
         {
-            if (scope is ContextFacade facade && facade._services.TryGet<T>(serviceName) is { } found)
+            if (scope is ContextFacade facade
+                && facade._isolateMap is { } map
+                && map.TryGetValue(serviceName, out var realm))
             {
-                return found;
+                return realm;
             }
         }
 
-        return default;
+        return string.Empty;
     }
 
     public void Provide<T>(string serviceName, T instance)
     {
         NotifyWrite(serviceName, instance);
 
-        // 03 §2.1 组合语义：插件（子 scope）服务注册到公共祖先（root），兄弟插件经父链可见；
-        // 隔离实例（独立 root / isolate）服务留在本地，互不可见（03 §2.2）。
-        _ownedServices.Add(serviceName); // G-C3：属主追踪（卸载时注销）
-        if (Parent is not null && Root is ContextFacade root)
-        {
-            root._services.Set(serviceName, instance, ownerId: Name);
-            return;
-        }
-
-        _services.Set(serviceName, instance, ownerId: Name);
+        // 18 §2 CA-1：值即注册——按本链 realm 写共享 store（组合 = 默认共享域；isolate = 私有/命名域）；
+        // disposer 记入 _provides（G-C3 属主追踪），卸载时 dispose 即删键 + Removed 通知
+        var realm = ResolveRealm(serviceName);
+        var disposer = _store.Provide(serviceName, realm, instance, ownerId: Name);
+        _provides.Add((serviceName, realm, disposer));
     }
 
     /// <summary>
-    /// G-C3 卸载钩子：注销本 context 属主提供的全部服务值（root/本地 store）。
-    /// 依赖方经 registry 事件重评（manifest 名由 PluginRuntime.StopCoreAsync 的 Unregister 处理）。
+    /// G-C3 卸载钩子：注销本 context 属主提供的全部服务值（dispose 删键 disposer，幂等；
+    /// 非属主/已移除均安全）。依赖方经发现层通知重评（T4 接线）。
     /// </summary>
     public void RemoveOwnedServices()
     {
-        foreach (var serviceName in _ownedServices)
+        foreach (var (_, _, disposer) in _provides)
         {
-            if (Parent is not null && Root is ContextFacade root)
-            {
-                root._services.Remove(serviceName, ownerId: Name);
-            }
-            else
-            {
-                _services.Remove(serviceName, ownerId: Name);
-            }
+            disposer.Dispose();
         }
 
-        _ownedServices.Clear();
+        _provides.Clear();
     }
 
     // ── IPluginContext：事件订阅面（转发 Events；监听者 scope 缺省 = 本 context，G15）──
