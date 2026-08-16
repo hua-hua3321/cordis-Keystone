@@ -93,6 +93,10 @@ public sealed class KeystoneHostOptions
     /// 文件已存在 → 忽略（现网配置优先）。null/空 = 无引导。</summary>
     public IReadOnlyList<EntryOptions>? InitialEntries { get; set; }
 
+    /// <summary>运行期 patch（CA-5，P61，对齐 Cordis include Config.patches）：启动时解析后、
+    /// manifest 校验前应用（插入组/根 + 按 id 覆盖）；注意与 PatchContext 瀑布（F9）语义不同。</summary>
+    public IReadOnlyList<Keystone.Config.Entries.EntryPatch>? ConfigPatches { get; set; }
+
     /// <summary>服务级选项（CA-12，P60，intercept 对应物·宿主级一层）：服务名 → 选项字典。
     /// 日志首例："logger" → { defaultLevel, capacity, levels: {category→level} }——
     /// 未注入 LoggerFactory 时构造 RingBufferLoggerProvider（显式 LoggerFactory 优先，不覆盖嵌入方）。</summary>

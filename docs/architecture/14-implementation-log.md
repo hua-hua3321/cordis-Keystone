@@ -964,6 +964,39 @@ created: 2026-08-15
 | W60-03 | 测试侧修正：插件源补 using Microsoft.Extensions.Logging（LogDebug/LogError 扩展方法）；多余 using 清理 | 修复 | — | ✅ |
 | W60-04 | 全量回归 398/398（Hosting 70→78：+8）；Hosting AOT 零 IL；10 §4 服务消费定式写入；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
 
+### 7.61 P61 P2 批四项：CA-9 计时器竞态加固 + CA-7 readonly 降级 + CA-15 noSave + CA-5 运行期 patch（TDD）
+
+| 任务 | 目标（严禁简化） | 影响范围 | 验收标准 | 状态 |
+|------|----------------|---------|---------|------|
+| T1 CA-9 竞态加固 | effect disposer 改 async：Cancel 后 await _runTask（收敛在途回调）；DisposeAsync 移除 _cts.Dispose()（消 ObjectDisposedException 竞态源头）；RunLoop catch 扩 ObjectDisposedException 兜底 | Sdk TimerExtensions | quiesce 后在途回调已完成（慢回调 TCS 断言）；无未观察任务异常（TaskScheduler 探针） | ✔ 2026-08-16 |
+| T2 CA-7 readonly 降级 | ConfigFileWriter：IsReadOnly 状态 + OnReadOnly 回调（一次性）；拒绝访问（UnauthorizedAccessException/0x80070005）→ 置位降级（区别 0x80070020 占用重试）；readonly 后 Write/Schedule/Flush 静默跳过 | Config Persistence | 0x80070005 → 第二次写不抛 + 回调恰一次；0x80070020 → 仍重试成功不降级 | ✔ 2026-08-16 |
+| T3 CA-15 noSave | UpdatePluginAsync(id, config, save: bool = true)；ApplyConfigAsync(newTree, save = true) 贯通事务（_suppressWriteBack 抑制子操作写回 + finally 解除 + 回滚同样抑制）；watcher 回调 save: false 防回环 | Hosting | watcher apply 后文件保持新值（未被写回重写）；noSave 内存树更新但不落盘 | ✔ 2026-08-16 |
+| T4 CA-5 运行期 patch | Config 层纯函数 EntryPatcher.Apply（插入组/根 + 按 id 覆盖非 null 字段 + name 不匹配跳过 onWarn + 空 patches 恒等）；KeystoneHostOptions.ConfigPatches → StartAsync 解析后 manifest 校验前应用 | Config Entries（新 EntryPatch/EntryPatcher）+ Hosting（ApplyConfigPatches） | 5 Config 测试 + 2 宿主测试（插入参与校验加载/覆盖 config 生效） | ✔ 2026-08-16 |
+
+#### 执行记录（2026-08-16）
+
+| # | 内容 | 方式 | 验证 | 状态 |
+|---|------|------|------|------|
+| W61-01 | 红测试 11 个：CA-9×2（在途回调/未观察异常）/ CA-7×2（拒绝降级/占用重试）/ CA-15×2（watcher 不回写/noSave 不落盘）/ CA-5×5（插入根/插入组/覆盖合并/不匹配警告/恒等）+ 宿主×2 | TDD | 构译期/断言红 | ✅ |
+| W61-02 | 实现：TimerHandle 保存 _runTask + async disposer await + 去 _cts.Dispose；ConfigFileWriter readonly 状态机（Volatile 读写 + IsAccessDenied/IsSharingViolation 分叉）；save 参数贯通（UpdatePluginAsync/ApplyConfigAsync/ApplyConfigEntryAsync + _suppressWriteBack try/finally）；EntryPatch/EntryPatcher + ApplyConfigPatches | 实现 | 11/11 绿 | ✅ |
+| W61-03 | 语义修正：CA-5 覆盖为条目级浅合并（config 整字段替换——对齐 Cordis entry patch；测试初版深合并期望改浅）；CA-7 回调命名 OnReadOnly（审计措辞） | 修复 | — | ✅ |
+| W61-04 | 全量回归 411/411 + Hosting AOT 零 IL（P62 前）；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
+
+### 7.62 P62 CA-2 插件源文件 watcher（TDD）
+
+| 任务 | 目标（严禁简化） | 影响范围 | 验收标准 | 状态 |
+|------|----------------|---------|---------|------|
+| T1 CA-2 | PluginFileWatcher（复用 ConfigFileWatcher 防抖模式，IncludeSubdirectories 覆盖 {root}/{id}/{main} 布局）；EnablePluginWatch()（opt-in，与 EnableConfigWatch 对称）；变更文件按 manifest.Main 匹配 active 条目 → PluginReloading + ReloadPluginAsync；ReloadPluginAsync 改走 PluginSource.FetchAsync（冷重启重取源——原先走静态 SourceProvider 读不到新代码） | Hosting（新 PluginFileWatcher + EnablePluginWatch + OnPluginSourceChangedAsync）+ Runtime（LocalPluginSource.Roots 暴露） | 文件改写 → 重载事件 + 状态仍 Active（热替换非失败）；无匹配文件变更 = 无操作 | ✔ 2026-08-16 |
+
+#### 执行记录（2026-08-16）
+
+| # | 内容 | 方式 | 验证 | 状态 |
+|---|------|------|------|------|
+| W62-01 | 红测试 2 个：变更触发重载（PluginReloading 事件）/ 无匹配变更无操作 | TDD | EnablePluginWatch 不存在构译红 | ✅ |
+| W62-02 | 实现 + 两处根因修复：① ReloadPluginAsync 取源走 PluginSource.FetchAsync（对齐 LoadEntryAsync——静态 SourceProvider 是旧代码副本）；② watcher 直调 ReloadPluginAsync 无事件（事件只在包装路径发）→ 回调先发 PluginReloading | 实现 | 事件触发 + Active | ✅ |
+| W62-03 | 连带真 bug：watcher 线程重载 vs 插件线程 Provide 并发 → RemoveOwnedServices 枚举崩溃（Collection was modified）——ContextFacade._provides 加锁 + 快照迭代 | 修复 | 重载链不再崩 | ✅ |
+| W62-04 | 全量回归 413/413（398→413：P61 +13/P62 +2）+ Hosting AOT 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |

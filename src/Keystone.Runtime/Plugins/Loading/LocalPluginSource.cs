@@ -6,13 +6,16 @@ namespace Keystone.Runtime.Plugins.Loading;
 /// </summary>
 public sealed class LocalPluginSource(params string[] roots) : IPluginSource
 {
+    /// <summary>根目录列表（CA-2：插件源 watcher 监听面暴露）。</summary>
+    public string[] Roots { get; } = [.. roots];
+
     public async Task<PluginSource> FetchAsync(Manifest.PluginManifest manifest, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(manifest);
 
-        var candidates = roots
+        var candidates = Roots
             .Select(root => Path.Combine(root, manifest.Main))
-            .Concat(roots.Select(root => Path.Combine(root, manifest.Id, manifest.Main)));
+            .Concat(Roots.Select(root => Path.Combine(root, manifest.Id, manifest.Main)));
 
         var path = candidates.FirstOrDefault(File.Exists);
         if (path is null)

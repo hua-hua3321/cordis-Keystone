@@ -50,6 +50,7 @@ public static class TimerExtensions
         private readonly TimeSpan? _debounceWindow;
         private readonly CancellationTokenSource _cts = new();
         private readonly Lock _lock = new();
+        private readonly Task _runTask = Task.CompletedTask; // RunLoop 任务引用（CA-9：quiesce 收敛在途回调用）
         private DateTimeOffset _nextAllowed;
         private Timer? _debounceTimer;
         private bool _disposed;
@@ -73,14 +74,22 @@ public static class TimerExtensions
 
             if (repeat || (throttleWindow is null && debounceWindow is null)) // timeout/interval 启动循环；throttle/debounce 由 Trigger 驱动
             {
-                _ = RunLoopAsync(_cts.Token); // timeout/interval 启动循环；throttle/debounce 由 Trigger 驱动
+                _runTask = RunLoopAsync(_cts.Token);
             }
 
-            // 随插件卸载回收（quiesce → Effect 逆序收敛 → 取消）
-            ctx.Context.Effect(() =>
+            // 随插件卸载回收（quiesce → Effect 逆序收敛 → 取消 + 等在途回调，CA-9：
+            // 修复前只 Cancel 不等——quiesce 返回时最后一次回调可能仍在飞）
+            ctx.Context.Effect(async () =>
             {
                 _cts.Cancel();
-                return Task.CompletedTask;
+                try
+                {
+                    await _runTask.ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // RunLoop 异常已被其自身 catch（此处兜底防未观察——CA9 加固）
+                }
             }, label: $"timer:{label}");
         }
 
@@ -143,8 +152,16 @@ public static class TimerExtensions
                 _cts.Cancel();
             }
 
-            _cts.Dispose();
-            await Task.CompletedTask.ConfigureAwait(false);
+            // CA-9：不 Dispose CTS——与 RunLoop 的 Task.Delay(delay, ct) 竞态会漏 ObjectDisposedException
+            // 出其 catch(OperationCanceledException)（未观察任务异常）；Cancel 已足够释放等待者，CTS 可终结
+            try
+            {
+                await _runTask.ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // 兜底：RunLoop 异常已自身 catch
+            }
         }
 
         private async Task RunLoopAsync(CancellationToken ct)
@@ -161,9 +178,9 @@ public static class TimerExtensions
                     }
                 }
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
             {
-                // 取消 = 正常退出（quiesce）
+                // 取消 = 正常退出（quiesce）；disposed 竞态兜底（CA-9 消除源头后不应再出现）
             }
         }
 

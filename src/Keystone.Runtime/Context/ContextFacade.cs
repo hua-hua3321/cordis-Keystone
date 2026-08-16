@@ -20,6 +20,7 @@ public sealed class ContextFacade : IPluginContext, IContext
     private readonly IReadOnlyDictionary<string, string>? _isolateMap;
     // 本 context 提供的服务（名, realm, 删键 disposer）：RemoveOwnedServices 逐个 dispose（幂等）
     private readonly List<(string Name, string Realm, IDisposable Disposer)> _provides = [];
+    private readonly Lock _providesLock = new(); // CA-2（P62）：watcher 线程重载 vs 插件线程 Provide 并发
     private readonly EventBus _events;
     private readonly EffectRegistry _effects = new();
     private readonly ILoggerFactory _loggerFactory;
@@ -124,7 +125,10 @@ public sealed class ContextFacade : IPluginContext, IContext
         // disposer 记入 _provides（G-C3 属主追踪），卸载时 dispose 即删键 + Removed 通知
         var realm = ResolveRealm(serviceName);
         var disposer = _store.Provide(serviceName, realm, instance, ownerId: Name);
-        _provides.Add((serviceName, realm, disposer));
+        lock (_providesLock)
+        {
+            _provides.Add((serviceName, realm, disposer));
+        }
     }
 
     /// <summary>
@@ -133,12 +137,17 @@ public sealed class ContextFacade : IPluginContext, IContext
     /// </summary>
     public void RemoveOwnedServices()
     {
-        foreach (var (_, _, disposer) in _provides)
+        List<(string Name, string Realm, IDisposable Disposer)> snapshot;
+        lock (_providesLock)
+        {
+            snapshot = [.. _provides]; // 快照迭代（Provide 并发安全）
+            _provides.Clear();
+        }
+
+        foreach (var (_, _, disposer) in snapshot)
         {
             disposer.Dispose();
         }
-
-        _provides.Clear();
     }
 
     // ── IPluginContext：事件订阅面（转发 Events；监听者 scope 缺省 = 本 context，G15）──

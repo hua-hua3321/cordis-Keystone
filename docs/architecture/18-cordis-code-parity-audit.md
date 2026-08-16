@@ -78,7 +78,7 @@ created: 2026-08-16
 
 **开放问题**：①事件投递是否也按域过滤 → 建议否（G15 scope 链已覆盖）；②完整档（registry 域感知）是否随第 1 步一起做，还是第 1+2 步先行（值域隔离 + 发现抽象），第 3 步按需——建议 1+2 先行
 
-### CA-2 插件源文件 watcher（P2，S）
+### CA-2 插件源文件 watcher（P2，S）——✅ 已实施（P62，2026-08-16；见 14 §7.62：PluginFileWatcher + EnablePluginWatch；连带修复 ReloadPluginAsync 未重取源与 _provides 并发）
 
 **研判**：08 §6 第一触发源；`ReloadPluginAsync` 冷重启管线完备（重编译+换 ALC+quiesce 旧实例），仅缺触发器。`IPluginSource` 抽象（P48）使 roots 可枚举。
 
@@ -108,7 +108,7 @@ created: 2026-08-16
 2. `MoveEntryAsync` 保留为纯移动便捷面（内部委托新 API 的移动段）
 3. TDD：移动+config 同改一次成功；config 失败 → 条目回原组原下标（断言下标精确）
 
-### CA-5 运行期 patch 注入（P2，S）
+### CA-5 运行期 patch 注入（P2，S）——✅ 已实施（P61-T4，2026-08-16；见 14 §7.61：EntryPatcher 纯函数 + ConfigPatches 校验前应用；覆盖为条目级浅合并）
 
 **研判**：include/index.ts:58-130 `Config.patches` 读后插入（组/根）+ 按 id 覆盖 + name 不匹配跳过。Keystone 无对应；`PatchContextAsync` 是上下文补丁瀑布（另一语义，XML doc 需注明防混淆）。
 
@@ -126,7 +126,7 @@ created: 2026-08-16
 2. 新宿主 API `StartFromFileAsync()`（无参）：要求 ConfigFilePath 已配置 → 文件不存在且 InitialEntries 非空 → `_configWriter.EnsureInitialAsync(InitialEntries)` → `File.ReadAllTextAsync` → 走既有 `StartAsync(text)`；文件已存在 → initial 忽略（对齐 Cordis）；文件不存在且无 initial → 抛 ConfigValidationFailed（对齐 include 报错）
 3. TDD：无文件+initial → 启动后文件存在且插件 Active；文件已存在 → initial 不覆盖；无文件无 initial → 明确报错
 
-### CA-7 配置写 readonly 优雅降级（P2，S）
+### CA-7 配置写 readonly 优雅降级（P2，S）——✅ 已实施（P61-T2，2026-08-16；见 14 §7.61：IsReadOnly + OnReadOnly + 占用/拒绝分叉）
 
 **研判**：include `checkAccess(W_OK)` 预检 → readonly 标记 → 写静默跳过。Keystone 只有占用重试（10×50ms）→ 超限抛 `ConfigProviderFailed`。08 §6.3 已承诺"readonly 检测：无写权限 → 只读模式，写操作报错不崩溃"。
 
@@ -142,7 +142,7 @@ created: 2026-08-16
 
 **解决方案**：补 ADR-0016《配置格式收敛 YAML-only》记录弃用理由（与静态插值互斥 + 单格式降低矩阵）；若未来确需 JSON：走 `IConfigProvider` 抽象（ADR-0013 已预留）自实现，声明不支持 !!env。**建议弃用，审核时定。**
 
-### CA-9 ~~计时器不随卸载回收~~ → 竞态加固（**初判误报**，降级 P2，S）
+### CA-9 ~~计时器不随卸载回收~~ → 竞态加固（**初判误报**，降级 P2，S）——✅ 已实施（P61-T1，2026-08-16；见 14 §7.61：disposer await 在途回调 + 去 Cts.Dispose）
 
 **研判（修正）**：初版断言"TimerHandle 不注册任何 effect"为 **grep 误报**（检索 `_ctx.Effect` 漏了实际写法 `ctx.Context.Effect`）。代码事实：
 - 构造尾部已注册：`ctx.Context.Effect(() => { _cts.Cancel(); ... }, label: $"timer:{label}")`（TimerExtensions.cs 构造段）
@@ -193,7 +193,7 @@ created: 2026-08-16
 |---|------|---------|
 | CA-13 依赖换实例重载（epoch） | Cordis epoch 含 `impl.fiber.uid`——同名服务换提供者 → 依赖方自动重载（fiber.ts:611-623）；Keystone `Provide→root.Set(ownerId)` 属主不同即抛 ServiceAlreadyRegistered（ServiceStore.cs:19-26，G14 rebind 报错）；仅 Available 翻转触发重载 | P2 增强候选：`Provide` 增重载 `Provide(name, instance, RebindPolicy policy)`——`Error`（默认，现行为）/`ReplaceAndNotify`（属主变更时：旧值 Remove + 新值 Set + registry 发 ServiceChanged → 依赖方走既有重载链）；不做 epoch 字符串（用属主比对等价实现）。**先问场景：多实现热替换（蓝绿）出现再做** |
 | CA-14 await 抛启动错误 | Cordis `fiber.await()` 重抛 startup error；Keystone CreateEntryAsync 收敛但失败进 FAILED 不抛（隔离语义 09 §2，GetPluginState 可查 + TaskFailedFact 已记录） | **接受差异**：12 §补注记（隔离语义是刻意设计——单插件失败不阻断管理面调用方） |
-| CA-15 update noSave | Cordis `update(config, noSave)` 提示位；Keystone UpdatePluginAsync 固定 ScheduleWriteBack | P2 小改：`UpdatePluginAsync(id, config, save: bool = true)`——save=false 跳过写回（内存态）；**配套**：ConfigFileWatcher 触发的 ApplyConfigAsync 内部走 save=false（文件已是新值，防回环写） |
+| CA-15 update noSave | Cordis `update(config, noSave)` 提示位；Keystone UpdatePluginAsync 固定 ScheduleWriteBack | ✅ 已实施（P61-T3，2026-08-16；见 14 §7.61：save 参数贯通 + watcher save=false 防回环） |
 | CA-16 internal/listener·dispatch | 无对应（.NET 事件模型下监听器注册/分发不作为总线事件暴露）；其余 7 个 internal/* 已有对应物 | **接受差异**：12 §注记（等价面 = EventSubscriptionOptions + 五模式分发本身） |
 | CA-17 写队列粒度 | include `applyQueue` 任务级串行（enqueue 排队）；Keystone `_applyingConfig` 自旋等待（10ms 轮询，功能等价粒度粗） | **接受差异 + 挂观察**：若高并发 CRUD 出现饿死/延迟再改 `Channel<Func<Task>>` 单消费泵；11 挂观察项 |
 | CA-18 Service 抽象基族 | init/invoke/extend/check/tracker 五符号；Keystone 服务 = 任意 T + Provide（init→InitializeAsync、invoke→仅 GetLogger 形态、extend/check 无） | **接受差异**：POCO 服务 + 扩展方法是 C# 惯例（check 为 G9 显式弃用）；12 §注记 |

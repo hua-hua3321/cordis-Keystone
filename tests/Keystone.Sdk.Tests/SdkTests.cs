@@ -97,6 +97,52 @@ public class TimerExtensionsTests
     }
 
     [Fact]
+    public async Task Quiesce_awaits_inflight_callback()
+    {
+        // CA-9（P61）收敛在途回调：慢回调进行中 quiesce → await DisposeEffectsAsync 返回时回调已完成
+        // （修复前 effect disposer 只 Cancel 不等 RunLoop——quiesce 返回时最后一次回调可能仍在飞）
+        var ctx = new ContextFacade("test");
+        var callbackDone = new TaskCompletionSource();
+        ctx.SetInterval(async () =>
+        {
+            await Task.Delay(150); // 慢回调
+            callbackDone.TrySetResult();
+        }, TimeSpan.FromMilliseconds(10));
+
+        await Task.Delay(20); // 等首轮回调在途
+        await ctx.DisposeEffectsAsync(); // quiesce 收敛
+
+        Assert.True(callbackDone.Task.IsCompleted, "quiesce 返回时在途回调应已完成（CA-9 收敛语义）");
+    }
+
+    [Fact]
+    public async Task Quiesce_leaves_no_unobserved_exception()
+    {
+        // CA-9（P61）CTS dispose 竞态：quiesce 后 RunLoop 无未观察异常
+        // （修复前 DisposeAsync 里 _cts.Dispose() 与 Task.Delay(delay, ct) 竞态 → ObjectDisposedException
+        //  漏出 RunLoop 的 catch(OperationCanceledException) → 未观察任务异常）
+        var unobserved = new TaskCompletionSource<Type>();
+        void OnUnobserved(object? _, UnobservedTaskExceptionEventArgs e) => unobserved.TrySetResult(e.Exception!.InnerExceptions[0].GetType());
+        TaskScheduler.UnobservedTaskException += OnUnobserved;
+        try
+        {
+            var ctx = new ContextFacade("test");
+            ctx.SetInterval(() => Task.CompletedTask, TimeSpan.FromMilliseconds(5));
+            await Task.Delay(20); // 循环在跑
+            await ctx.DisposeEffectsAsync(); // 取消 + 收敛
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            Assert.False(unobserved.Task.IsCompleted, "不应有未观察任务异常（ObjectDisposedException 竞态已消除）");
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= OnUnobserved;
+        }
+    }
+
+    [Fact]
     public async Task Throttle_limits_to_one_per_window()
     {
         var ctx = new ContextFacade("test");

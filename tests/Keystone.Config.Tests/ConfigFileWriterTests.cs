@@ -87,6 +87,59 @@ public class ConfigFileWriterTests : IDisposable
         Assert.Equal(2, writer.WriteAttempts);
     }
 
+    [Fact]
+    public async Task Access_denied_marks_readonly_and_swallows_subsequent_writes()
+    {
+        // CA-7（P61）readonly 优雅降级：0x80070005（拒绝访问）→ 置 readonly + 回调恰一次；
+        // 之后写静默跳过（不抛、不再尝试——对齐 include checkAccess(W_OK) 预检降级）
+        var path = Path.Combine(_directory, "ro.yml");
+        var detected = 0;
+        using var writer = new AccessDeniedWriter(path) { OnReadOnly = () => detected++ };
+
+        await writer.WriteAsync(EntryParser.Parse("- id: a\n  name: ./a\n")); // 首写触发降级
+        Assert.True(writer.IsReadOnly);
+        Assert.Equal(1, detected); // 回调恰一次
+
+        await writer.WriteAsync(EntryParser.Parse("- id: b\n  name: ./b\n")); // 静默返回（不抛）
+        Assert.True(writer.IsReadOnly); // 仍 readonly
+        Assert.False(File.Exists(path)); // 从未真正写盘
+    }
+
+    [Fact]
+    public async Task Sharing_violation_still_retries_without_readonly()
+    {
+        // CA-7：0x80070020（共享占用）≠ 拒绝访问——该重试不降级
+        var path = Path.Combine(_directory, "busy.yml");
+        using var writer = new SharingViolationWriter(path);
+
+        // 占用 2 次后放行 → 重试成功（未降级）
+        await writer.WriteAsync(EntryParser.Parse("- id: a\n  name: ./a\n"));
+
+        Assert.False(writer.IsReadOnly);
+        Assert.True(File.Exists(path)); // 重试后写成功
+    }
+
+    private sealed class AccessDeniedWriter(string path) : ConfigFileWriter(path)
+    {
+        protected override Task PerformAtomicWriteAsync(string targetPath, string content)
+            => throw new UnauthorizedAccessException("access denied") { HResult = unchecked((int)0x80070005) };
+    }
+
+    private sealed class SharingViolationWriter(string path) : ConfigFileWriter(path)
+    {
+        private int _attempts;
+
+        protected override async Task PerformAtomicWriteAsync(string targetPath, string content)
+        {
+            if (_attempts++ < 2)
+            {
+                throw new IOException("in use", unchecked((int)0x80070020));
+            }
+
+            await base.PerformAtomicWriteAsync(targetPath, content);
+        }
+    }
+
     private sealed class FlakyPathConfigFileWriter : ConfigFileWriter
     {
         public int WriteAttempts { get; private set; }

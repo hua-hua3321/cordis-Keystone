@@ -27,7 +27,9 @@ public sealed class KeystoneHost : IAsyncDisposable
     private Keystone.Config.Persistence.ConfigFileWriter? _configWriter; // DC-15：CRUD 落盘写回
     private Keystone.Runtime.Persistence.FactRetentionScheduler? _retention; // DC-18：定时 Prune
     private ConfigFileWatcher? _configWatcher; // DC-9：配置文件监听
+    private PluginFileWatcher? _pluginWatcher; // CA-2：插件源文件监听
     private volatile bool _applyingConfig; // DC-9：apply 串行化（watcher 首扫与初始化防竞态交错）
+    private bool _suppressWriteBack; // CA-15：事务期写回抑制（save=false 路径）
     private Keystone.Runtime.Logging.RingBufferLoggerProvider? _ringBufferLogs; // CA-12：ServiceOptions logger 接线产物（诊断面）
     private Microsoft.Extensions.Logging.ILoggerFactory? _ownedLoggerFactory; // CA-12：自建 factory（Create 静态类型即接口；Shutdown 经此字段 Dispose）
     private CapabilityDomain? _capabilityDomain;
@@ -55,6 +57,12 @@ public sealed class KeystoneHost : IAsyncDisposable
     // ── 启动 / 关闭 ──
 
     /// <summary>8 步启动（09 §2）：解析条目 → schema 校验 → manifest 校验 → 根 context → 并行加载（门控拓扑）→ 就绪。</summary>
+    /// <summary>运行期 patch 应用（CA-5，P61）：解析后、manifest 校验前（对齐 Cordis patch 在 schema 前生效）。</summary>
+    private IReadOnlyList<EntryOptions> ApplyConfigPatches(IReadOnlyList<EntryOptions> entries)
+        => _options.ConfigPatches is { Count: > 0 } patches
+            ? Keystone.Config.Entries.EntryPatcher.Apply(entries, patches)
+            : entries;
+
     /// <summary>文件入口启动（CA-6，P60，对齐 Cordis include Service.init ENOENT+initial 先写再读）：
     /// 要求 ConfigFilePath 已配置——文件不存在且 <see cref="KeystoneHostOptions.InitialEntries"/> 非空 →
     /// 写入 initial 再读；文件已存在 → initial 忽略（现网配置优先）；两者皆无 → 明确报错。</summary>
@@ -141,6 +149,9 @@ public sealed class KeystoneHost : IAsyncDisposable
             .Select(layer => EntryParser.Parse(layer, interpolator))
             .ToList();
         var entries = EntryTree.ApplyLayers(layers);
+
+        entries = ApplyConfigPatches(entries); // CA-5：读后 patch（校验前）
+
         _tree.Clear();
         _tree.AddRange(entries);
 
@@ -284,9 +295,9 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// <summary>CRUD 变更防抖写回（ConfigFilePath 未配置 = 纯内存，无操作）。</summary>
     private void ScheduleWriteBack()
     {
-        if (_options.ConfigFilePath is null)
+        if (_options.ConfigFilePath is null || _suppressWriteBack)
         {
-            return;
+            return; // CA-15：save=false 的事务内子操作不写回（防回环）
         }
 
         NotifyConfigUpdate(); // 配置写回前通知（F9 loader/config-update）
@@ -470,7 +481,10 @@ public sealed class KeystoneHost : IAsyncDisposable
         var entry = FindEntry(_tree, id)
             ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
         var manifest = _options.ManifestProvider(entry);
-        var source = _options.SourceProvider(entry);
+        // CA-2（P62）：冷重启重取源（获取端抽象优先——文件形态读到最新代码；静态 SourceProvider 兜底）
+        var source = _options.PluginSource is { } pluginSource
+            ? await pluginSource.FetchAsync(manifest).ConfigureAwait(false)
+            : _options.SourceProvider(entry);
         var config = await ResolvePluginConfigAsync(entry).ConfigureAwait(false);
 
         // DC-6：先卸载旧实例（Unregister 释放 provides 注册）再启动新——避免同名注册冲突
@@ -495,7 +509,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// 插件配置热更新（G-C8）：更新条目 config → PatchContext 瀑布（可否决）→ 重载。
     /// 对齐 08 §6.1 "仅 config 变 → 热更新"分级 + ADR-0005 决策 3。
     /// </summary>
-    public async Task UpdatePluginAsync(string id, object? newConfig)
+    public async Task UpdatePluginAsync(string id, object? newConfig, bool save = true)
     {
         ThrowIfShuttingDown();
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
@@ -509,7 +523,10 @@ public sealed class KeystoneHost : IAsyncDisposable
         {
             ReplaceEntry(_tree, updated);
             await ReloadPluginAsync(id).ConfigureAwait(false);
-            ScheduleWriteBack(); // 应用成功才落盘（否决不写）
+            if (save)
+            {
+                ScheduleWriteBack(); // 应用成功才落盘（否决不写；CA-15 save=false 内存态不落盘）
+            }
         }).ConfigureAwait(false);
     }
 
@@ -640,7 +657,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// name/inject/isolate 变 → 冷重启（ReloadPluginAsync）；disabled 翻转 → 挂起/恢复
     /// （SetEntryDisabledAsync）。应用后写回落盘（事务性刷新语义：新树 = 真源）。
     /// </summary>
-    public async Task ApplyConfigAsync(IReadOnlyList<EntryOptions> newTree)
+    public async Task ApplyConfigAsync(IReadOnlyList<EntryOptions> newTree, bool save = true)
     {
         ArgumentNullException.ThrowIfNull(newTree);
 
@@ -658,7 +675,7 @@ public sealed class KeystoneHost : IAsyncDisposable
                 return; // deepEqual 相等即跳过（08 §6.1）
             }
 
-            await ApplyDiffTransactionallyAsync(diff).ConfigureAwait(false);
+            await ApplyDiffTransactionallyAsync(diff, save).ConfigureAwait(false);
             ConfigReloaded?.Invoke(this, new ConfigReloadedEventArgs(diff.ChangedIds));
         }
         finally
@@ -671,48 +688,65 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// 任一失败 → 逆序撤销本次已成功的变更；回滚失败聚合进同一异常上抛
     /// （对齐 Cordis group 事务；diff 增量模式下回滚面更小——旧条目未动无需重建）。
     /// 每步前 ThrowIfShuttingDown（Disposal owns termination：卸载中的组更新不回滚）。</summary>
-    private async Task ApplyDiffTransactionallyAsync(ConfigDiff diff)
+    private async Task ApplyDiffTransactionallyAsync(ConfigDiff diff, bool save)
     {
         var applied = new List<Func<Task>>(); // 逆序回滚动作栈（成功一步记一步）
         var failures = new List<Exception>();
-        var oldEntries = diff.ConfigChanged.Concat(diff.StructurallyChanged)
-            .Select(e => FindEntry(_tree, e.Id!))
-            .Where(e => e is not null)
-            .ToDictionary(e => e!.Id!, e => e!, StringComparer.Ordinal); // 变更前旧条目（回滚素材）
-
-        await CollectPerItemAsync(diff.Removed, failures, async id =>
+        _suppressWriteBack = !save; // CA-15：save=false（watcher 路径）→ 子操作写回抑制（防回环）
+        try
         {
-            ThrowIfShuttingDown();
-            await RemoveEntryAsync(id).ConfigureAwait(false); // 删除不回滚重建（旧树在调用方）
-        }).ConfigureAwait(false);
+            var oldEntries = diff.ConfigChanged.Concat(diff.StructurallyChanged)
+                .Select(e => FindEntry(_tree, e.Id!))
+                .Where(e => e is not null)
+                .ToDictionary(e => e!.Id!, e => e!, StringComparer.Ordinal); // 变更前旧条目（回滚素材）
 
-        await CollectPerItemAsync(diff.Added, failures, entry => ApplyAddedEntryAsync(entry, applied)).ConfigureAwait(false);
-
-        await CollectPerItemAsync(diff.DisabledFlips, failures, entry => ApplyDisabledFlipAsync(entry, applied)).ConfigureAwait(false);
-
-        // 结构变（两阶段，P57-T5）：阶段级收集（组替换与叶子重载共享树状态，逐条中断会留半替换树）
-        await CollectStepAsync(failures, async () =>
-        {
-            ThrowIfShuttingDown();
-            await ApplyStructuralChangesAsync(diff.StructurallyChanged).ConfigureAwait(false);
-            foreach (var entry in diff.StructurallyChanged)
+            await CollectPerItemAsync(diff.Removed, failures, async id =>
             {
-                if (oldEntries.GetValueOrDefault(entry.Id!) is { } oldEntry)
-                {
-                    applied.Add(async () =>
-                    {
-                        ReplaceEntry(_tree, oldEntry);
-                        await ReloadPluginAsync(oldEntry.Id!).ConfigureAwait(false);
-                    });
-                }
-            }
-        }).ConfigureAwait(false);
+                ThrowIfShuttingDown();
+                await RemoveEntryAsync(id).ConfigureAwait(false); // 删除不回滚重建（旧树在调用方）
+            }).ConfigureAwait(false);
 
-        await CollectPerItemAsync(diff.ConfigChanged, failures, entry => ApplyConfigEntryAsync(entry, oldEntries, applied)).ConfigureAwait(false);
+            await CollectPerItemAsync(diff.Added, failures, entry => ApplyAddedEntryAsync(entry, applied)).ConfigureAwait(false);
+
+            await CollectPerItemAsync(diff.DisabledFlips, failures, entry => ApplyDisabledFlipAsync(entry, applied)).ConfigureAwait(false);
+
+            // 结构变（两阶段，P57-T5）：阶段级收集（组替换与叶子重载共享树状态，逐条中断会留半替换树）
+            await CollectStepAsync(failures, async () =>
+            {
+                ThrowIfShuttingDown();
+                await ApplyStructuralChangesAsync(diff.StructurallyChanged).ConfigureAwait(false);
+                foreach (var entry in diff.StructurallyChanged)
+                {
+                    if (oldEntries.GetValueOrDefault(entry.Id!) is { } oldEntry)
+                    {
+                        applied.Add(async () =>
+                        {
+                            ReplaceEntry(_tree, oldEntry);
+                            await ReloadPluginAsync(oldEntry.Id!).ConfigureAwait(false);
+                        });
+                    }
+                }
+            }).ConfigureAwait(false);
+
+            await CollectPerItemAsync(diff.ConfigChanged, failures,
+                entry => ApplyConfigEntryAsync(entry, oldEntries, applied, save)).ConfigureAwait(false);
+        }
+        finally
+        {
+            _suppressWriteBack = false; // 异常/回滚路径同样解除抑制
+        }
 
         if (failures.Count > 0)
         {
-            await RollbackAsync(applied, failures).ConfigureAwait(false);
+            _suppressWriteBack = true; // 回滚动作同样不写回（树最终回到调用方期望态）
+            try
+            {
+                await RollbackAsync(applied, failures).ConfigureAwait(false);
+            }
+            finally
+            {
+                _suppressWriteBack = false;
+            }
         }
     }
 
@@ -739,11 +773,12 @@ public sealed class KeystoneHost : IAsyncDisposable
     private async Task ApplyConfigEntryAsync(
         EntryOptions entry,
         IReadOnlyDictionary<string, EntryOptions> oldEntries,
-        List<Func<Task>> applied)
+        List<Func<Task>> applied,
+        bool save = true)
     {
         ThrowIfShuttingDown();
         PluginUpdating?.Invoke(this, new PluginUpdatingEventArgs(entry.Id!, entry.Config));
-        await UpdatePluginAsync(entry.Id!, entry.Config).ConfigureAwait(false);
+        await UpdatePluginAsync(entry.Id!, entry.Config, save).ConfigureAwait(false);
         var oldConfig = oldEntries.GetValueOrDefault(entry.Id!)?.Config;
         var changedId = entry.Id!;
         applied.Add(() => UpdatePluginAsync(changedId, oldConfig));
@@ -844,8 +879,53 @@ public sealed class KeystoneHost : IAsyncDisposable
         {
             var yaml = await File.ReadAllTextAsync(path).ConfigureAwait(false);
             var tree = Keystone.Config.Entries.EntryParser.Parse(yaml);
-            await ApplyConfigAsync(tree).ConfigureAwait(false);
+            // CA-15：文件已是新值——不写回（防回环写）
+            await ApplyConfigAsync(tree, save: false).ConfigureAwait(false);
         });
+    }
+
+    /// <summary>
+    /// 启用插件源文件监听（CA-2，P62，08 §6 第一触发源；与 EnableConfigWatch 对称，opt-in）：
+    /// 源文件变更（防抖合并）→ 按 manifest.Main 文件名匹配 active 条目 → 冷重启
+    /// <see cref="ReloadPluginAsync"/>（重编译 + 换 ALC + quiesce 旧实例）。
+    /// 编译失败 → 插件 FAILED（隔离语义，不崩宿主）。仅 LocalPluginSource roots 形态可监听。
+    /// </summary>
+    public void EnablePluginWatch()
+    {
+        ThrowIfShuttingDown();
+        if (_pluginWatcher is not null)
+        {
+            return; // 幂等
+        }
+
+        var roots = (_options.PluginSource as Keystone.Runtime.Plugins.Loading.LocalPluginSource)?.Roots
+            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed,
+                "PluginSource is not a LocalPluginSource — no plugin roots to watch");
+        if (roots.Length == 0)
+        {
+            throw new KeystoneException(ErrorCode.ConfigValidationFailed, "no plugin roots configured to watch");
+        }
+
+        _pluginWatcher = new PluginFileWatcher(roots[0], file => OnPluginSourceChangedAsync(file, roots));
+    }
+
+    private async Task OnPluginSourceChangedAsync(string file, string[] roots)
+    {
+        var fileName = Path.GetFileName(file);
+        // 按 manifest.Main 文件名匹配 active 条目（roots 下约定布局）
+        var matches = EnumerateActiveLeaves([.. _tree])
+            .Where(entry => string.Equals(
+                Path.GetFileName(_options.ManifestProvider(entry).Main),
+                fileName,
+                StringComparison.Ordinal))
+            .Select(entry => entry.Id!)
+            .ToList();
+        foreach (var id in matches)
+        {
+            ThrowIfShuttingDown();
+            PluginReloading?.Invoke(this, new PluginReloadingEventArgs(id)); // 双轨事件（F9）
+            await ReloadPluginAsync(id).ConfigureAwait(false); // 冷重启管线（编译失败 → FAILED 隔离）
+        }
     }
 
     // ── 管理面事件：PatchContext（waterfall 可否决，F9）──

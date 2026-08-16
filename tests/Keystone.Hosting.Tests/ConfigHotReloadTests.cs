@@ -146,4 +146,37 @@ public class ConfigHotReloadTests : IDisposable
 
         Assert.Contains("b", await applied.Task, StringComparison.Ordinal); // watcher 触发重载并含新增条目
     }
+
+    [Fact]
+    public async Task Watcher_apply_does_not_write_back()
+    {
+        // CA-15（P61）防回环：文件已是新值——watcher 触发的 apply 不写回
+        //（修复前 apply 内 UpdatePluginAsync 固定 ScheduleWriteBack → 写回同内容回环）
+        var yaml1 = "- id: a\n  name: ./a\n";
+        await WriteConfigAsync(ConfigPath, yaml1);
+        await using var host = await StartAsync(yaml1, Options(ConfigPath));
+        host.EnableConfigWatch();
+
+        var applied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.ConfigReloaded += (_, _) => applied.TrySetResult();
+
+        var yaml2 = "- id: a\n  name: ./a\n  config:\n    k: 2\n";
+        await WriteConfigAsync(ConfigPath, yaml2); // 文件变更（含 config 热更）
+        await (await Task.WhenAny(applied.Task, Task.Delay(TimeSpan.FromSeconds(30))));
+
+        await Task.Delay(300); // 防抖窗口 + 余量
+        Assert.Equal(yaml2, File.ReadAllText(ConfigPath)); // 文件保持新值（未被写回重写——内容/时间戳层面等价）
+    }
+
+    [Fact]
+    public async Task UpdatePlugin_noSave_skips_write_back()
+    {
+        // CA-15：noSave=true → 内存态更新（不落盘）；save 默认 true 保持现行为
+        await using var host = await StartAsync("- id: a\n  name: ./a\n");
+
+        await host.UpdatePluginAsync("a", new Dictionary<string, object?> { ["k"] = 1 }, save: false);
+
+        Assert.Contains(host.DumpConfig(), e => e.Config is not null); // 内存树已更新
+        Assert.False(File.Exists(ConfigPath)); // 未写盘（noSave）
+    }
 }
