@@ -39,7 +39,11 @@ created: 2026-08-16
 
 **解决方案（三步，第 0 步是 schema 决策——先于任何接线）**：
 
-*第 0 步：schema 决策（审核二选一）*
+*第 0 步：schema + 默认域决策（P54 按 Cordis 源码已裁定）*
+- **默认域 = 共享**（realm=""）：Cordis `Context` 构造 isolate 映射为空（context.ts:72），`provide` 对未隔离名回落 root 默认符号 `Symbol(name)`（reflect.ts:290 `root[symbols.isolate][name] ??= Symbol(name)`）——**不写 isolate = 共享，非"每实例独立子容器"**（01 §4/03 §2.2 旧描述已随 P54 修正）
+- 隔离仅当显式声明：`isolate: {name: true}` → realm `#entryId`（LocalRealm 私有，isolate.ts:37 suffix='#'+id）；`isolate: {name: "label"}` → realm `@label`（GlobalRealm 命名共享，suffix='@'+label）
+- **能力域实例默认 realm 裁定 = ""（共享）**；实例隔离需求走 isolate 显式声明（能力域 actor 现状不 Provide/Get，无迁移成本）
+- schema 决策（审核二选一）：
 - 方案 A（对齐 Cordis）：`isolate` 改 `Dict<name → true|"label">`——保留两档域语义（私有/共享）；EntryParser 改映射解析；工作量 +S；收益 = 上游配置可平移、多实例同服务名两档表达完整
 - 方案 B（保留 Keystone 简化）：`isolate` 维持列表，语义收窄为"条目私有域"（列表内名字一律按 LocalRealm 语义）；补 08 §3 注记"不实现 GlobalRealm 共享标签（多实例共享域场景由 inject+组合语义覆盖）"；工作量最小
 
@@ -184,7 +188,7 @@ created: 2026-08-16
 | 编号 | 项 | 研判后优先级 | 工作量 | 建议处置 |
 |------|----|-----------|--------|---------|
 | CA-10 | 组 CRUD 级联（孤儿插件） | **P0（唯一正确性）** | M | **实施** |
-| CA-1 | isolate 接线 | P1 | 取决于 schema 决策（A: +S / B: M~L） | **先定 schema**（A 对齐 Cordis map 两档 / B 保留列表简化）；再定档（最小=值域隔离+门控全局 / 完整=registry 域感知） |
+| CA-1 | isolate 接线 | P1 | 取决于 schema 决策（A: +S / B: M~L） | **默认域已裁定=共享**（P54）；待定 schema（A 对齐 Cordis map 两档 / B 保留列表简化）+ 门控档（最小=值域隔离 / 完整=registry 域感知） |
 | CA-3 | 组级事务 + 回滚 | P1 | M | 实施（08 §6.2 已设计）；**并行改拓扑分层**（规避 DC-5 门控超时伪失败） |
 | CA-4 | 组合 update | P1 | S | 实施 |
 | CA-6 | initial 引导（激活死代码） | P1 | S | 实施 |

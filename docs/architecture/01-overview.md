@@ -60,13 +60,14 @@ C# 版保留这个组合纪律，但用 .NET 原生能力替代 JS 动态特性�
 ```
 配置层：capability-domain 定义 + instance 数量 + scope 父子关系
   → 管理层读配置 → 同一能力域 spawn N 个 actor
-  → 每个 actor 独立 context（独立子容器/独立作用域链）
+  → 每个 actor 独立 context（事件/Effect/管道独立；服务经共享 store + realm 键隔离）
   → 事件在各自 context 链上路由，互不冲突
 ```
 
-隔离机制（详见 03-context.md）：
-- 每实例独立 context（组合而非继承，注册表互不写回）
-- 服务隔离：每实例独立子 IServiceProvider
+隔离机制（详见 03-context.md；2026-08-16 P54 按 Cordis 源码修正）：
+- 服务存储：单一共享 KeyedServiceStore，键 = (服务名, realm)；**默认 realm=""（共享）**，
+  隔离靠条目 isolate 显式声明（true→#entryId 私有 / "label"→@label 命名共享）
+- 每实例独立 context：事件总线/Effect/请求 CT 槽/管道独立，context 链隔离
 - 事件隔离：context filter + scope 父子链
 
 ## 5. 关键设计决策（摘要，详情见各文档）

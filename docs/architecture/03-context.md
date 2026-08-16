@@ -40,8 +40,9 @@ C# 版用三层混合实现，各取所长，不造轮子：
 
 **不需要自己实现"作用域链查找"**——三者组合即 Cordis extend() 的完整语义。
 
-边界用例（同名服务不同 scope）：不同 scope 各自解析天然隔离——
-每个能力域实例用独立 scope 根（CreateScope 的 scope factory），隔离免费。
+边界用例（同名服务不同 scope）：**默认共享**（realm=""，人人命中同一键）；隔离经条目
+isolate 显式声明——`{name: true}` 私有域（#entryId）、`{name: "label"}` 命名共享域（@label）。
+（2026-08-16 P54 按 Cordis 源码修正：Cordis 默认共享，非"每实例独立 scope 根"。）
 
 > **实现备注（2026-08-15，P21，见 14-implementation-log §7.21 / DEV-02 / ID-18）**：服务解析链落地形态——`ContextFacade.Provide` 在 context 有父时写入**公共祖先（root）**（§2.1 组合语义：子不覆盖父、首次注册公共区，属主校验保留）；`Get/TryGet` 沿父链向上（自己 → 父 → 根）。插件（共享 root 父）的服务经父链跨插件可见（inject 依赖注入，ADR-0007）；隔离实例（独立 root）服务留本地，互不可见（§2.2 不变）。
 
@@ -57,9 +58,9 @@ C# 版用三层混合实现，各取所长，不造轮子：
 
 `IServiceScope` 是整 scope 隔离，粒度过粗；Cordis 可对**单个服务名**建独立 scope（`isolate('fs', label)`，同 label 共享、不同 label 隔离）。C# 对应：
 
-- 每服务一个**命名子 scope**（或子容器按服务名分组）：`isolate("fs", "instance-a")` → 该服务名在独立容器内解析
+- 键 = (服务名, realm)，单一共享 store（Cordis `reflect.store` 对应物）；realm ∈ {"" 默认共享, "#entryId" 私有, "@label" 命名共享}
 - 多实例模型下"实例 A 用 fs-A、实例 B 用 fs-B"只隔离 fs 服务，**不连带隔离其他服务**
-- 整 scope 隔离（每实例独立 scope 根）保留为默认，服务级隔离按需声明（配置层 `isolate` 字段）
+- **默认共享**（realm=""，对齐 Cordis：未 isolate 的名字回落到 root 默认符号）；隔离按需声明（配置层 `isolate` 字段：true=私有 / "label"=命名共享）
 - **isolate 变更语义**（F10，P8 已落地）：条目的 isolate 声明变化 → 受影响服务触发依赖方重载（ADR-0007，P3 PluginRuntime 依赖消失→卸载 已实现）；**跨 realm 服务转移优化明确不实现**（ID-11：多实例隔离靠解析侧独立 context 天然达成，转移是性能优化非语义必需）；变更通知经 09 §5 PatchContext waterfall 接线
 
 ### 2.3 set 属主校验（G8 决策）

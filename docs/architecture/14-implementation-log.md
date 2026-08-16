@@ -156,6 +156,7 @@ created: 2026-08-15
 | ID-31 | 2026-08-15 | P36 | 依赖超时接线（DC-5）：WaitForDependenciesAsync 加超时（DependencyWaitTimeout 默认 30s，构造器可注入短超时）→ 超时 FAILED（GatingDependencyTimeout），错误经 AwaitAsync 可查 | ADR-0007 风险表"依赖永不就绪→启动超时→FAILED+告警"；此前 PENDING 无限挂起；配置存在但未接线（DC-5 模式） | `src/Keystone.Runtime/Plugins/Lifecycle/PluginRuntime.cs` | 否（17-doc-compliance-audit DC-5） |
 | ID-32 | 2026-08-15 | P37 | 监督策略（DC-4）：CapabilityDomain.Spawn 配 OneForOneStrategy（Restart decider + MaxRestarts 默认 3/窗口 5s，超阈值停止不再重启 = 域不可用升级） | 05 §2/09 §3 监督承诺；此前裸 props 无监督配置；Proto OneForOneStrategy 承载重启计数 + 窗口语义 | `src/Keystone.Runtime/Actors/CapabilityDomain.cs`、`CapabilitySupervisionOptions.cs` | 否（17-doc-compliance-audit DC-4） |
 | ID-33 | 2026-08-16 | P38 | 静态插值双层形态（DC-8，ADR-0012）：YAML 整值标量走 tag 形态（!!env NAME/!!file path，YamlDotNet TagName）；文本内容内引用走冒号前缀形态（!!env:NAME）；缺失保留标记（tag 形态重构为 `!!env NAME` 字符串，不静默替换）；环检测 visited 改展开栈语义（add→递归→remove，同文件多处引用非环） | ADR-0012 tag 机制保留（YamlDotNet 自定义 tag）；字符串中间嵌入标记不支持（ADR 示例均为整值）；原实现 visited 只增不减（误报环） | `src/Keystone.Config/Interpolation/StaticInterpolator.cs`、`Entries/EntryParser.cs`、`src/Keystone.Hosting/KeystoneHostOptions.cs` | 否（17-doc-compliance-audit DC-8） |
+| ID-50 | 2026-08-16 | P54 | **隔离默认语义裁定（源码级）**：Cordis `Context` 构造 isolate 映射为空（context.ts:72 `Object.create(null)`），`provide` 对未隔离名回落到 root 默认符号 `Symbol(name)`（reflect.ts:290 `??=`）——**不写 isolate = 共享**；隔离仅显式 `isolate: {name: true}`（LocalRealm #entryId 私有）/`{name:"label"}`（GlobalRealm @label 命名共享）。据此推翻 01 §4"每实例独立子 IServiceProvider"、03 §2.2"整 scope 隔离保留为默认/每实例独立 scope 根"——这些是当年 MS.DI IServiceScope 类比硬套，与 Cordis 相悖。能力域实例默认 realm 裁定 = ""（共享），隔离走 isolate 显式声明 | 教训：**框架语义（默认值/隔离方向）必须回到上游源码裁定，不能被"设计期类比"固化**——01/03 的错误类比存在了数月未被发现，与 CA-9（grep 漏检）、CA-1（漏看 isolate.ts 数据模型）同源：都缺"回到上游完整形态复核"这一步 | `docs/architecture/01-overview.md`、`03-context.md`、`18-cordis-code-parity-audit.md` | 否（随语义裁定轮） |
 | ID-49 | 2026-08-16 | P53 | **决策批判修正**：①CA-1 漏判 schema 分叉——Cordis isolate 是 Dict<name→true|"label">（true=LocalRealm 条目私有域 #entryId / "label"=GlobalRealm 共享命名域 @label，isolate.ts 全文），Keystone 是列表（EntryParser.cs:92 StringList）且 08 §3 定位"组级"；此前"机制已有缺接线"结论只覆盖了运行时侧，未覆盖配置模型侧。②CA-3 并行缺陷——Keystone 门控有超时（DC-5 GatingDependencyTimeout，PluginRuntime.cs:285 不无限 PENDING），Cordis PENDING 无限等，组内全并行会让依赖兄弟的新条目伪超时。③CA-13 RebindPolicy 冗余（provider 重启已被 P25/P26 unload→re-register 链覆盖；owner 比对复现不了 epoch 的 fiber-uid 语义）。④CA-12 首步拆两阶段（默认 provider 先于 ServiceOptions）。⑤CA-6/7 与 ADR-0013 源抽象的张力 | 教训：**方案评审要回到上游事实的完整形态**（Cordis 字段是 map 不是 list——只看了 context.ts 的 isolate 方法签名，没看 loader/config/isolate.ts 的数据模型，导致方案建立在错误 schema 上） | `docs/architecture/18-cordis-code-parity-audit.md`（v3：§2 + §5.1） | 否（随批判轮） |
 | ID-48 | 2026-08-16 | P52 | **研判修正记录**：①CA-9 初判"计时器不随卸载回收"为 grep 误报——初版检索 `_ctx.Effect` 漏检实际写法 `ctx.Context.Effect`（TimerHandle 构造尾已注册 + PluginRuntime.cs:354 quiesce 收敛 DisposeEffectsAsync）；残留真实问题仅两个轻微点（DisposeAsync 的 _cts.Dispose() 与在途 Task.Delay 注册竞态可抛 ObjectDisposedException 漏网 / effect 收敛不等在途回调）；②CA-1 收窄——ContextFacade 每 context 独立 store + Resolve 沿父链 + 类注释已声明"独立链=天然隔离"，缺的是 EntryOptions.Isolate 配置接线（宿主三处工厂一律挂 root）与 registry 门控域感知；解决方案从 ServiceStore 键扩展改为 ContextFacade isolateNames 分支（侵入更小），分最小/完整两档待选 | 教训入库：**抽样 grep 不能作为"不存在"结论的依据**——否定性结论必须全文读码或双模式检索复核；P45 死代码 bug（ID-41）与本次误报同源（声明与实现的错位靠单一检索模式必然漏检） | `docs/architecture/18-cordis-code-parity-audit.md`（v2） | 否（随研判轮） |
 | ID-47 | 2026-08-16 | P51 | **审计方法决策**：17 审计（文档承诺 vs 实现）闭合后，功能差距复查不再采信任何文档状态表（11/16/17 的 ✅ 不作依据）——直接提取 vendored Cordis 源码运行面（8 核心文件类成员 + loader EntryTree/Group + include 文件管线，≈95 行为点）与本仓 src/ 逐项 grep/读码验证。产出 CA-1~18（未实现 12 + 差异 6 ≈ 18%）+ 每项实现提案（18 §2/§3），**全部待人工决策不实施**（18 §5 决策矩阵：P0 正确性 2 项——CA-9 计时器僵尸副作用 / CA-10 组删除孤儿插件） | 口径升级动机：P45 Serialize 索引重载死代码 bug（ID-41）实证"文档说有 ≠ 代码能用"；登记为 18 新文档而非并入 17（17 是文档达成度口径，18 是代码等价口径，结论不互通） | `docs/architecture/18-cordis-code-parity-audit.md`、`11-gap-register.md` §3.3 | 否（提案集，决策后分流） |
@@ -823,6 +824,15 @@ created: 2026-08-15
 | 2026-08-16 | W53-02 | CA-3 复核：Keystone 门控超时（DC-5）→ 组内全并行伪超时隐患 → 拓扑分层方案 | 批判 | ID-49 | 同上 | PluginRuntime.cs:285 证据 | ✅ |
 | 2026-08-16 | W53-03 | CA-13/12/4/6 复核注记（RebindPolicy 冗余/默认 provider 先行/YAGNI/源抽象张力） | 批判 | ID-49 | 同上 §5.1 | frontmatter 校验通过；334/334 保持全绿 | ✅ |
 
+### 7.54 P54 隔离语义对齐 Cordis（纯文档轮）
+
+> 按 Cordis 源码裁定默认隔离语义：默认共享（realm=""），隔离靠 isolate 显式声明。修正 01 §4/03 §2.2 的"每实例独立子容器"错误类比 + 18 §2 CA-1 定稿默认域。
+
+| 日期 | 编号 | 工作项 | 类型 | 决策引用 | 实现落点 | 验收凭证 | 结果 |
+|------|------|--------|------|---------|---------|---------|------|
+| 2026-08-16 | W54-01 | 读 Cordis context.ts 构造 + reflect.provide/get 键解析 → 裁定默认共享（root 默认符号回落） | 裁定 | ID-50 | — | context.ts:72 / reflect.ts:290 证据 | ✅ |
+| 2026-08-16 | W54-02 | 修正 01 §4"每实例独立子 IServiceProvider"、03 §2.2"整 scope 隔离保留为默认"+边界用例、18 §2 CA-1 默认域=共享 + realm 模型定稿 | 文档 | R10；ID-50 | `01-overview.md`、`03-context.md`、`18-cordis-code-parity-audit.md` | frontmatter 校验通过；334/334 保持全绿 | ✅ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -955,6 +965,8 @@ created: 2026-08-15
 | ID-48 | 研判修正；否定性结论复核纪律 | `docs/`（18 v2 + 11 §3.3） | W52-01~03 |
 | W53-01~03 | ID-49 | `docs/architecture/18-cordis-code-parity-audit.md`（v3） | 纯文档（无代码） |
 | ID-49 | 决策批判；方案回到上游完整形态 | `docs/`（18 v3 + 11 §3.3） | W53-01~03 |
+| W54-01~02 | ID-50 | `01-overview.md`、`03-context.md`、`18-cordis-code-parity-audit.md` | 纯文档（无代码） |
+| ID-50 | 隔离默认语义裁定；推翻设计期类比 | `docs/`（01/03/18） | W54-01~02 |
 
 ## 9. 维护规则
 
