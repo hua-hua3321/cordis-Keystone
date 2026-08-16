@@ -29,7 +29,7 @@ created: 2026-08-15
 | G4 | key 语义 | P0 | ✅ 已收敛 | ADR-0007 + 02 §3 | key = 服务名 |
 | G5 | 依赖门控激活 | P0 | ✅ 已收敛 | ADR-0007 + 02 §3 | PENDING 等待 + 服务变更重载 |
 | G6 | intercept 配置 | P1 | **显式弃用**（通用机制） | ADR-0010 + 05 §5 | IOptions 命名选项为最终形态；C# 对应物见 [12-cordis-semantics-mapping.md](12-cordis-semantics-mapping.md) §2 |
-| G7 | 按服务隔离 | P1 | ✅ 已收敛 | 03 §2.2 | 命名子 scope |
+| G7 | 按服务隔离 | P1 | ✅ 已实施（P57 CA-1：realm 键 + 配置接线 + 门控域感知） | 03 §2.2 / 18 §2 CA-1 | (name, realm) 键控 store |
 | G8 | set 属主校验 | P1 | ✅ 已收敛 | 03 §2.3 | context 门面属主薄封装 |
 | G9 | Impl.check 谓词 | P2 | **显式弃用** | ADR-0010 | 注册即用；未就绪由插件运行期自管；C# 对应物（Ready Task/健康探针）见 [12-cordis-semantics-mapping.md](12-cordis-semantics-mapping.md) §3 |
 | G10 | serial/bail 分发 | P0 | ✅ 已收敛 | ADR-0006 + 06 §2 + 04 §3 + 03 §4 | 五种模式全集 |

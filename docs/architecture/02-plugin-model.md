@@ -54,33 +54,22 @@ var fs = ctx.Get<IFsProvider>();
 
 ## 3. 键控服务 + 子容器（决策 D2）
 
-**键控服务（Keyed Services）**解决"强类型接口 + 运行期实例区分"（ADR-0007 决策 1）：
+**键控服务**解决"强类型接口 + 运行期实例区分"（ADR-0007 决策 1）。实现形态（P57 已落地，18 §2 CA-1）：**自建 `KeyedServiceStore`**（非 MS.DI 键控——后者是 per-scope 容器模型，与 Cordis 全局 store 语义不符，ID-50）：
 
 ```csharp
-// 注册：key = 服务名（语义标识，消费者按服务名声明依赖，不感知提供者身份）
-services.AddKeyedScoped<IFsProvider, LocalFsProvider>("fs");
-services.AddKeyedScoped<ILLMProvider, ClaudeProvider>("llm");
-
-// 解析：编译期类型 + 服务名 key
-var fs = ctx.Get<IFsProvider>("fs");          // GetRequiredKeyedService 等价物
-var llm = ctx.Get<ILLMProvider>("llm");
+// 键 = (服务名, realm) 二元组，进程级单一共享 store（Cordis reflect.store 对应物）
+ctx.Provide<IFsProvider>("fs", new LocalFsProvider());   // 写入本条目生效 realm 的键
+var fs = ctx.Get<IFsProvider>("fs");                     // 解析 = 算 realm + 查共享 store
 ```
 
-- **key = 服务名**（类型 + 名称二元组），**插件 ID 只用于子容器分组与回收**，不参与服务解析 key——否则消费者必须知道"哪个插件提供 fs"，依赖从服务契约退化成实现耦合
-- 同一服务名同一 scope 内重复注册 = **报错**（rebind 语义，见 03-context §2），禁止同名覆盖
+- **key = (服务名, realm)**，**插件 ID 只用于属主校验与回收**，不参与服务解析 key——否则消费者必须知道"哪个插件提供 fs"，依赖从服务契约退化成实现耦合
+- realm ∈ {"" 默认共享, "#声明处Id" 私有, "@label" 命名共享}（03 §2.2）；同一服务名同域重复注册 = **报错**（rebind 语义，见 03-context §2），异域共存
+- **可用 = 值存在**（单一事实源）：门控/依赖恢复直接投影 store 键，无独立 availability 状态（发现层 `IServiceDiscovery`，未来可换分布式 adapter）
 
-**子容器**解决"隔离 + 回收"：
+**值生命周期**解决"回收"（替代子容器方案，P57）：`Provide` 返回删键 disposer（幂等），`ContextFacade` 追踪本 context 全部 disposer，插件卸载 = 逐一执行（删键 + Removed 批量通知 → 依赖方重评，G-C2/G-C3）。
 
-```
-每个插件实例 = 独立子 IServiceProvider（或 IServiceScope）
-  ├─ 插件注册：AddKeyedScoped 到自己的容器（key = 服务名）
-  ├─ 解析：GetRequiredKeyedService<T>(服务名)   ← 编译期类型安全
-  ├─ 隔离：实例间容器独立，同名 key 不冲突
-  └─ 卸载：释放整个容器 = 自动回收所有注册
-```
-
-- DI 没有原生的"移除键控服务"简单 API → 用子容器，卸载 = 扔容器
-- 子容器按插件 ID 分组（回收粒度），服务解析 key 按服务名（契约粒度）——两层各司其职
+- 不引入 per-插件 DI 容器：键控簿记由共享 store 承担，隔离由 realm 键承担（"实例 A 用 fs-A、实例 B 用 fs-B" = 同名异域，03 §2.2）
+- 卸载 = 删自己写的键（属主校验保证不误删他人），无容器可泄漏
 
 **依赖门控激活**（ADR-0007 决策 3）：插件在 `inject` 声明的服务全部可用前保持 PENDING（状态机见 §6/ADR-0005），缺服务不抛异常而是等待；服务提供方卸载/替换 → 依赖方自动 reload/unload。这是"等依赖就绪再启动"的 Cordis 核心机制。
 

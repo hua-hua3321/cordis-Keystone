@@ -55,11 +55,11 @@ public interface IMiddleware
 public interface IPluginContext
 {
     // 服务：按服务名解析（ADR-0007：key = 服务名）
-    T Get<T>(string serviceName);                       // 依赖未就绪 → PENDING 等待后注入
-    T? TryGet<T>(string serviceName);                   // 可选服务（对齐 ctx.get 可选读取）
+    T Get<T>(string serviceName);                       // 依赖未就绪 → PENDING 等待后注入；按本条目 isolate 生效 realm 解析（P57）
+    T? TryGet<T>(string serviceName);                   // 可选服务（对齐 ctx.get 可选读取）；同名异域不串
 
     // 服务注册：本插件提供服务（属主 = 本插件，set 属主校验，03-context §2.3）
-    void Provide<T>(string serviceName, T instance);
+    void Provide<T>(string serviceName, T instance);    // 写入生效 realm 键；manifest.provides 声明须 init 期兑现（值即注册，P57-T4）
 
     // 事件：五种分发模式（ADR-0006）
     IDisposable Subscribe<TEvent>(Action<TEvent> handler);              // emit

@@ -24,7 +24,7 @@ created: 2026-08-16
 
 ## 2. A 类：未实现（12 项）
 
-### CA-1 isolate 服务隔离：配置接线 + 门控域感知（P1，M）
+### CA-1 isolate 服务隔离：配置接线 + 门控域感知（P1，M）——✅ 已实施（P57，2026-08-16；见 14 §7.57：T1 schema / T2 KeyedServiceStore / T3 facade 接线 / T4 发现投影+门控统一 / T5 宿主端到端+F10）
 
 **研判（含两轮修正）**：
 - Cordis 事实（isolate.ts 全文）：`isolate` 是 **`Dict<name → true|"label">` 两档域**，非列表——

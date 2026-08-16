@@ -33,7 +33,7 @@ CompositionRoot actor
   → 3. manifest 校验（依赖图可达性 + 无环 + 白名单，ADR-0007）
   → 4. 构建服务依赖图（provides/inject 拓扑）
   → 5. spawn 能力域 actor（每域一个，含独立 scope 根）
-  → 6. 插件加载序 = 拓扑序 + PENDING 等待（ADR-0007 决策 3）
+  → 6. 插件加载序 = 拓扑序 + PENDING 等待（ADR-0007 决策 3；门控按生效 realm 判可用——isolate map 与 context 工厂同源注入，P57-T5）
   → 7. 全部 ACTIVE 或 FAILED（FAILED → 启动告警，按 05-reliability §3 策略）
   → 8. 就绪信号（宿主可开始接收任务）
 ```

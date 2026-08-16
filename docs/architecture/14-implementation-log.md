@@ -867,7 +867,7 @@ created: 2026-08-15
 | T3 ContextFacade 接线 | facade 持共享 root store（独立 root 自持）；realm 沿链推导（isolate map 子继承父/子影子覆盖/均无→""）；Resolve 算 realm 查共享 store；Provide 带 realm+disposer 追踪；RemoveOwnedServices 逐 disposer 幂等清理 | ContextFacade/IContext/删 ServiceStore+IServiceStore+ServiceStoreTests + 2 测试调用点 | 14 新测试红→绿（兄弟可见/属主冲突/重绑/幂等清理/私有对无 map 隐藏/双私有隔离/同 label 互见/链继承/子影子覆盖/按名隔离不连坐/同 realm 冲突/GetLazy/独立 root 自持/GatingServiceNotFound）；全量 371 绿；AOT；提交 | ✔ 2026-08-16 |
 | T4 发现投影+门控统一 | IServiceRegistry→IServiceDiscovery 只读投影（IsAvailable(name,realm)+Subscribe+AvailableServices）；PluginRuntime 删双注册；门控带 realm；init 后校验 provides⊆owned | ServiceRegistry/IServiceRegistry/PluginRuntime/PluginLoader/KeystoneHost + Runtime/Hosting 测试 | 门控/依赖恢复（G-C2）/DC-5 诊断全绿；provides 未 Provide → 明确 FAILED；全绿；AOT；提交 | ✔ 2026-08-16 |
 | T5 宿主端到端 | 三 context 工厂按 entry.Isolate 算 realm；组谱系 #groupId 推导；isolate 变更触发依赖方重载（F10） | KeystoneHost + ConfigDiffer + IsolateMapResolver(Config) + PluginLoader + Hosting.Tests | e2e：同 label 共享/私有隔离/默认共享；配置改 isolate → 受影响条目重载；全绿；AOT；提交 | ✔ 2026-08-16 |
-| T6 总验收 | 全量回归 + 六工程 AOT + 文档回写（02/03/08/09/10/11/14/18/AGENTS）+ CA-1 标记已实施 | 全仓 | 345+N 全绿；AOT 全零 IL；文档同步；frontmatter；最终提交 | ⏳ |
+| T6 总验收 | 全量回归 + 六工程 AOT + 文档回写（02/03/08/09/10/11/14/18/AGENTS）+ CA-1 标记已实施 | 全仓 | 345+N 全绿；AOT 全零 IL；文档同步；frontmatter；最终提交 | ✔ 2026-08-16 |
 
 #### T3 执行记录（2026-08-16）
 
@@ -900,6 +900,15 @@ created: 2026-08-15
 | W57-T5-04 | KeystoneHost：BuildIsolateMap（根→目标谱系链解析）+ FindEntryPath；三工厂（LoadEntry/Reload/Mount）同 map 注入 context 工厂与 PluginLoader（门控域==解析域）；ApplyStructuralChangesAsync 两阶段（先整体替换树再逐叶冷重启——组声明先落位，叶子重载读到新谱系） | 实现 | — | ✅ |
 | W57-T5-05 | 测试证明手法迭代（2 版）：初版"消极挂起断言"踩宿主加载语义（LoadSourceAsync await 终态，门控不满足阻塞 30s）+ 类型名跨测试并行撞 ALC；终版改值路由证明（各域放可区分值按解析结果断言，全积极断言不阻塞）+ 类型名全套件唯一 | 修复 | 5/5 绿；Hosting 57 测试复跑 3 次零失败 | ✅ |
 | W57-T5-06 | 全量回归 377/377（Hosting 52→57：+5）；Config+Hosting AOT 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
+
+#### T6 执行记录（2026-08-16）
+
+| # | 内容 | 方式 | 验证 | 状态 |
+|---|------|------|------|------|
+| W57-T6-01 | 全量回归 377/377（Core 30 / AI 19 / Config 69 / Sdk 30 / Hosting 57 / Runtime 172） | 验收 | dotnet test 6 套件 Passed | ✅ |
+| W57-T6-02 | 六工程 AOT 冒烟全零 IL 警告（Core/Config/Runtime/Hosting/Sdk/AI） | 验收 | publish -p:PublishAot=true grep 0 | ✅ |
+| W57-T6-03 | 文档回写：02 §3 键控服务改自建 KeyedServiceStore 实态（ID-50 修正：弃 MS.DI per-scope 类比；值生命周期替代子容器）；03 §2.1 实现备注更新 (name,realm) 键控 + §2.2 F10 标 P57-T5；09 启动流步骤 6 带生效 realm；10 接口注释带 realm 语义与 provides 兑现契约；11 G7 → 已实施；18 CA-1 标题标 ✅ 已实施 | 文档 | frontmatter 校验通过 | ✅ |
+| W57-T6-04 | AGENTS 状态行收口（CA-1 实施完成）+ 最终提交 | 文档 | — | ✅ |
 
 #### T2 执行记录（2026-08-16）
 
