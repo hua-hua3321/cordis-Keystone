@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Keystone.Config.Entries;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Keystone.Config.Validation;
@@ -39,6 +40,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     private Microsoft.Extensions.Logging.ILoggerFactory? _ownedLoggerFactory; // CA-12：自建 factory（Create 静态类型即接口；Shutdown 经此字段 Dispose）
     private CapabilityDomain? _capabilityDomain;
     private OpenTelemetry.Trace.TracerProvider? _tracerProvider; // P70-T2：OTel 导出（ADR-0018 L3）
+    private OpenTelemetry.Metrics.MeterProvider? _meterProvider; // P70-T5：OTel 指标导出（ADR-0018 L3）
     private IReadOnlyList<string> _uncollectedPlugins = [];
     private bool _shutdown;
 
@@ -316,6 +318,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// <summary>P70-T2 诊断面：OTel provider 是否建立（Enabled=false 时 false——
     /// 进程内全局 listener 使导出内容不可归因于单宿主，配置生效性以本状态为准）。</summary>
     internal bool TracerProviderBuilt => _tracerProvider is not null;
+    internal bool MeterProviderBuilt => _meterProvider is not null; // P70-T5：指标导出管线是否已建
 
     /// <summary>
     /// 宿主事件总线（P22，B4 公开事件面）：StartAsync 后可用（root context 共享总线，ID-08）。
@@ -1284,6 +1287,24 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
 
         _tracerProvider = builder.Build();
+
+        // P70-T5（ADR-0018 L3）：指标导出管线——7 指标经 Console/OTLP 可见（与 span 同源同开关；
+        // 采样只控 trace，不控 metric）
+        var meterBuilder = Sdk.CreateMeterProviderBuilder()
+            .AddMeter(Keystone.Runtime.Trace.KeystoneMeter.Name)
+            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("keystone"));
+
+        if (obs.ConsoleEnabled)
+        {
+            meterBuilder = meterBuilder.AddConsoleExporter();
+        }
+
+        if (obs.OtlpEndpoint is { } meterEndpoint)
+        {
+            meterBuilder = meterBuilder.AddOtlpExporter(o => o.Endpoint = new Uri(meterEndpoint));
+        }
+
+        _meterProvider = meterBuilder.Build();
     }
 
     /// <summary>开启宿主配置切片 span（P70-T4，ADR-0018 L1）：功能保底 listener 恒应答 →
@@ -1314,6 +1335,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     {
         await ShutdownAsync().ConfigureAwait(false);
         _tracerProvider?.Dispose(); // P70-T2：最后拆——关闭路径 span 仍在导出面
+        _meterProvider?.Dispose(); // P70-T5：指标导出随宿主收口（周期导出线程 + reader 一并释放）
         _configWriter?.Dispose(); // DC-15：写回器随宿主释放
         _retention?.Dispose(); // DC-18：定时 Prune 随宿主停止
         _configWatcher?.Dispose(); // DC-9：配置监听随宿主停止

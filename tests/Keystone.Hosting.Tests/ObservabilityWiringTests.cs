@@ -104,6 +104,17 @@ public class ObservabilityWiringTests
 
         Assert.True(result.Succeeded); // 功能不受影响（保底 listener 在探针层，独立于导出）
         Assert.False(host.TracerProviderBuilt); // P70-T2：未配置 → 不建 provider
+        Assert.False(host.MeterProviderBuilt); // P70-T5：未配置 → 不建 meter provider
+        await host.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task Default_observability_builds_meter_provider()
+    {
+        await using var host = new KeystoneHost(Options());
+        await host.StartAsync("- id: obs\n  name: ./obs\n");
+
+        Assert.True(host.MeterProviderBuilt); // P70-T5：指标导出管线默认建（ADR-0018 L3）
         await host.ShutdownAsync();
     }
 }
