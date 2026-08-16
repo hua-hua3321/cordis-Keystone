@@ -37,27 +37,39 @@ created: 2026-08-16
   - 门控 `IServiceRegistry` 宿主级单例无域概念（IServiceRegistry.cs）
 - **修正后定性**：三层缺口——①schema 分叉（列表 vs map 两档）；②配置未接线（三处 context 工厂一律挂 root）；③门控无域感知。其中 ① 是**设计决策**（08 §3 故意简化），需先定 schema 去留
 
-**解决方案（三步，第 0 步是 schema 决策——先于任何接线）**：
+**解决方案（决策全部裁定：P54 默认域=共享 · P55 schema=对齐 Cordis map · 抽象化接缝）**：
 
-*第 0 步：schema + 默认域决策（P54 按 Cordis 源码已裁定）*
-- **默认域 = 共享**（realm=""）：Cordis `Context` 构造 isolate 映射为空（context.ts:72），`provide` 对未隔离名回落 root 默认符号 `Symbol(name)`（reflect.ts:290 `root[symbols.isolate][name] ??= Symbol(name)`）——**不写 isolate = 共享，非"每实例独立子容器"**（01 §4/03 §2.2 旧描述已随 P54 修正）
-- 隔离仅当显式声明：`isolate: {name: true}` → realm `#entryId`（LocalRealm 私有，isolate.ts:37 suffix='#'+id）；`isolate: {name: "label"}` → realm `@label`（GlobalRealm 命名共享，suffix='@'+label）
-- **能力域实例默认 realm 裁定 = ""（共享）**；实例隔离需求走 isolate 显式声明（能力域 actor 现状不 Provide/Get，无迁移成本）
-- schema 决策（审核二选一）：
-- 方案 A（对齐 Cordis）：`isolate` 改 `Dict<name → true|"label">`——保留两档域语义（私有/共享）；EntryParser 改映射解析；工作量 +S；收益 = 上游配置可平移、多实例同服务名两档表达完整
-- 方案 B（保留 Keystone 简化）：`isolate` 维持列表，语义收窄为"条目私有域"（列表内名字一律按 LocalRealm 语义）；补 08 §3 注记"不实现 GlobalRealm 共享标签（多实例共享域场景由 inject+组合语义覆盖）"；工作量最小
+*第 0 步：schema 对齐（P55 已裁定 = 方案 A）*
+- `isolate` 改 `Dict<name → true|"label">`：`EntryOptions.Isolate` 由 `IReadOnlySet<string>` 改
+  `IReadOnlyDictionary<string, IsolateSpec>`；`IsolateSpec = Private（true）| Shared（label）`
+- EntryParser 改映射解析 + **列表 shim**（旧 `isolate: [fs]` ≡ `{fs: true}` 全私有，迁移零成本）
+- EntrySerializer / EntryTree 分层合并 / ConfigDiffer 结构键 三触点跟改；08 §3 示例随实现同步改 map 形态
 
-*最小档（值域隔离，门控保持全局）*（方案 B 前提下）：
-1. `ContextFacade` 构造增 `ISet<string>? isolateNames = null`（沿链继承合并）；`Resolve`：名字在隔离集 → 只查本域链（不越隔离边界）；否则现状（本域→父链→root）。`Provide`：名字在隔离集 → 写本地 `_services`（ownerId=Name）；否则写 root（组合语义不变）
-2. 宿主：`GetOrCreateIsolateContext(IReadOnlySet<string> isolate)` 按"排序后集合"键缓存隔离 base context（父 = root，携 isolateNames）；三处 context 工厂按 `entry.Isolate` 分流
-3. **限制（须注明）**：门控仍按全局 registry——隔离服务的可用性事件全局可见，非隔离插件可能门控放行后 `Get` 落空（GatingServiceNotFound）；隔离插件 inject 隔离服务时门控看不到本域提供者 → 永久 PENDING。**适用前提：隔离服务不参与跨域 inject 门控**（自用型服务）
-4. TDD：两插件同 isolate 组 provide 同名服务互不冲突（对照组：无 isolate 第二个 provide 报 ServiceAlreadyRegistered）；隔离名 Get 不回落 root；非隔离名仍组合可见
+*第 1 步：统一键控存储（值层，进程内，不可分布式）*
+- `KeyedServiceStore`（自写 ~200 行纯内存簿记）：
+  `ConcurrentDictionary<(name, realm), (value, ownerId)>`；热路径无锁读；冷路径 `Lock` 复合写（属主校验+写）；
+  **出锁后** fire `OnChanged((name, realm), Provided|Removed)`；`可用 = ContainsKey`（单一事实源）
+- `ContextFacade`：`_services` 从自建 `ServiceStore` → 引用共享 store；`Resolve` 改"算 realm + 查共享 store"；
+  `Provide/RemoveOwnedServices` 带 realm；新增 realm 计算（沿链继承）
+- 清理：Provide 注册 effect disposer（删键 + Removed 通知），复用 EffectRegistry **推式**清理（无扫描器）
+- realm ∈ {"" 默认共享, "#entryId" 私有, "@label" 命名共享}
 
-*完整档（+ registry 域感知）*：
-5. `IServiceRegistry` 增域维度：`Register(name, providerId, scopeKey)` / `IsAvailable(name, scopeKey)`；PluginRuntime 门控评估传本插件 scopeKey；隔离 base context 持 scopeKey
-6. 工作量 M→L；收益 = 跨域 inject 的隔离语义完整（对齐 Cordis notify filter）
+*第 2 步：发现层抽象（元数据，可分布式——用户新增要求，接缝必须画此处）*
+- **值层不可分布式**：`KeyedServiceStore` 持**活 .NET 对象实例**（`ctx.Provide<T>` 的 `T`），Redis/Consul 存不了
+- **可分布式的只有发现元数据**（谁提供/可用性/端点）。抽象接缝 = 发现层，非值层：
+  - `IServiceDiscovery`（异步 + 元数据 payload + watch 通知 + 可选 TTL/租约）：
+    `RegisterAsync/LookupAsync/WatchAsync/UnregisterAsync(..., CancellationToken)`
+  - 内存实现 = **投影** `KeyedServiceStore`（可用 = 键存在，零冗余状态）
+  - 未来实现 = Redis pub/sub / Consul / etcd（同构 Steeltoe `IDiscoveryClient`、Aspire `IServiceEndpointProvider`）
+- 插件门控只消费 `IServiceDiscovery` → 未来换分布式实现，PluginRuntime/值 store **零改动**
+- 这修正了 P52 的"删 ServiceRegistry"表述：**不是删，是升格**——`IServiceRegistry` → `IServiceDiscovery`（可交换抽象），
+  其内存实现从"独立冗余状态"改为"投影值 store"，单一事实源仍在
 
-**开放问题**：①事件投递是否也按域过滤（Cordis notify filter 含此）→ 建议否（G15 scope 链已覆盖主场景）；②选最小档还是完整档
+*第 3 步：门控域感知（完整档，域维度落在发现层）*
+- `IServiceDiscovery` 的 name 带 realm；PluginRuntime 门控传本插件 realm；
+  notify 域过滤 = `WatchAsync` 按 `(name, realm)` 精确订阅（对齐 Cordis notify filter）
+
+**开放问题**：①事件投递是否也按域过滤 → 建议否（G15 scope 链已覆盖）；②完整档（registry 域感知）是否随第 1 步一起做，还是第 1+2 步先行（值域隔离 + 发现抽象），第 3 步按需——建议 1+2 先行
 
 ### CA-2 插件源文件 watcher（P2，S）
 
@@ -188,7 +200,7 @@ created: 2026-08-16
 | 编号 | 项 | 研判后优先级 | 工作量 | 建议处置 |
 |------|----|-----------|--------|---------|
 | CA-10 | 组 CRUD 级联（孤儿插件） | **P0（唯一正确性）** | M | **实施** |
-| CA-1 | isolate 接线 | P1 | 取决于 schema 决策（A: +S / B: M~L） | **默认域已裁定=共享**（P54）；待定 schema（A 对齐 Cordis map 两档 / B 保留列表简化）+ 门控档（最小=值域隔离 / 完整=registry 域感知） |
+| CA-1 | isolate 接线 | P1 | M（1+2 步）→ +M（第 3 步） | **全部裁定**：默认域=共享（P54）/ schema=对齐 Cordis map（P55）/ 抽象接缝=发现层（P55）；实施序 1+2 先行 |
 | CA-3 | 组级事务 + 回滚 | P1 | M | 实施（08 §6.2 已设计）；**并行改拓扑分层**（规避 DC-5 门控超时伪失败） |
 | CA-4 | 组合 update | P1 | S | 实施 |
 | CA-6 | initial 引导（激活死代码） | P1 | S | 实施 |
