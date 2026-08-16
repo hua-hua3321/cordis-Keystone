@@ -28,7 +28,7 @@ public static class ConfigDiffer
         var removed = oldById.Keys.Where(id => !newById.ContainsKey(id)).ToList();
 
         var configChanged = new List<EntryOptions>();
-        var structurallyChanged = new List<EntryOptions>();
+        var structurallyChanged = new List<StructuralChange>();
         var disabledFlips = new List<EntryOptions>();
         foreach (var (id, newEntry) in newById)
         {
@@ -45,7 +45,10 @@ public static class ConfigDiffer
 
             if (!string.Equals(StructuralKey(oldEntry), StructuralKey(newEntry), StringComparison.Ordinal))
             {
-                structurallyChanged.Add(newEntry.Entry); // name/inject/isolate（生效域）变 → 冷重启
+                // P1-7（19 号审计 LD-17）：name/inject/isolate（生效域）/形状（叶↔组）/归属（跨组移动）变 → 冷重启
+                //（对齐 entry.ts:194 group 标志变 = replace）；携带新树 (parent, position) 供应用侧落位
+                var (sparent, sposition) = Locate(newTree, id);
+                structurallyChanged.Add(new StructuralChange(newEntry.Entry, sparent, sposition));
             }
             else if (!ConfigEquals(oldEntry.Entry.Config, newEntry.Entry.Config))
             {
@@ -56,17 +59,19 @@ public static class ConfigDiffer
         return new ConfigDiff(added, removed, configChanged, structurallyChanged, disabledFlips);
     }
 
-    /// <summary>扁平化（组递归展开——比对按叶/组条目 id 全集）。携带生效 isolate map（谱系累积，P57-T5）。</summary>
-    private static IEnumerable<EffectiveEntry> Flatten(IReadOnlyList<EntryOptions> entries, Dictionary<string, string>? inherited = null)
+    /// <summary>扁平化（组递归展开——比对按叶/组条目 id 全集）。携带生效 isolate map（谱系累积，P57-T5）
+    /// 与父组 id（P1-7：归属入结构键——跨组移动检出）。</summary>
+    private static IEnumerable<EffectiveEntry> Flatten(
+        IReadOnlyList<EntryOptions> entries, Dictionary<string, string>? inherited = null, string? parentId = null)
     {
         foreach (var entry in entries)
         {
             var map = inherited is null ? [] : new Dictionary<string, string>(inherited, StringComparer.Ordinal);
             IsolateMapResolver.Apply(entry, map);
-            yield return new EffectiveEntry(entry, map);
+            yield return new EffectiveEntry(entry, map, parentId);
             if (entry.Group is { } children)
             {
-                foreach (var child in Flatten(children, map))
+                foreach (var child in Flatten(children, map, entry.Id))
                 {
                     yield return child;
                 }
@@ -77,11 +82,12 @@ public static class ConfigDiffer
     /// <summary>结构键：冷重启判定字段（08 §6.1：name/inject/isolate 变 → 冷重启）。
     /// isolate 用生效 realm（#声明处Id/@label，谱系解析）——组级声明变化会改变叶子生效键 → 叶子冷重启（F10）。</summary>
     private static string StructuralKey(EffectiveEntry e)
-        => $"{e.Entry.Name}|{string.Join(",", e.Entry.Inject)}|"
+        => $"{e.ParentId}|{e.Entry.Name}|{string.Join(",", e.Entry.Inject)}|"
         + string.Join(",", e.EffectiveIsolate.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .Select(kv => $"{kv.Key}={kv.Value}"));
+            .Select(kv => $"{kv.Key}={kv.Value}"))
+        + (e.Entry.IsGroup ? "|group" : "|leaf"); // P1-7：形状（叶↔组转换检出）
 
-    private sealed record EffectiveEntry(EntryOptions Entry, Dictionary<string, string> EffectiveIsolate);
+    private sealed record EffectiveEntry(EntryOptions Entry, Dictionary<string, string> EffectiveIsolate, string? ParentId);
 
     /// <summary>P0-1：在树中定位条目归属（父组 id + 组内下标；根级 = (null, 根列表下标)）。</summary>
     private static (string? Parent, int? Position) Locate(IReadOnlyList<EntryOptions> tree, string id)

@@ -89,12 +89,17 @@ public class EntryPatcherTests
     }
 
     [Fact]
-    public void Empty_patches_is_identity()
+    public void Empty_patches_is_content_identity_but_detached()
     {
+        // P2-2a（19 号审计 LD-12，对齐 include structuredClone）：空 patches 内容恒等但 detached
+        //（修复前同引用——入参可变性会穿透到结果）
         var tree = Parse("- id: a\n  name: ./a\n");
 
         var patched = EntryPatcher.Apply(tree, []);
 
-        Assert.Same(tree, patched); // 空 patches 恒等（同引用）
+        Assert.NotSame(tree, patched); // detached
+        Assert.Equal(tree.Count, patched.Count);
+        Assert.Equal(tree[0].Id, patched[0].Id);
+        Assert.Equal(tree[0].Name, patched[0].Name);
     }
 }

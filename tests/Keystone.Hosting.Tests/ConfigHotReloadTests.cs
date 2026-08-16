@@ -148,6 +148,61 @@ public class ConfigHotReloadTests : IDisposable
     }
 
     [Fact]
+    public async Task Watcher_replays_interpolation_on_reload()
+    {
+        // P0-4（19 号审计 LD-11/IN-2）：watcher 路径必须与 StartAsync 同管线——
+        // 重读时重跑静态插值（修复前：!!env 原始标记串被当配置值注入）
+        var yaml1 = "- id: a\n  name: ./a\n";
+        await WriteConfigAsync(ConfigPath, yaml1);
+        var options = Options(ConfigPath);
+        options.EnvProvider = name => name == "MODE" ? "prod" : null;
+        await using var host = await StartAsync(yaml1, options);
+        host.EnableConfigWatch();
+
+        var applied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.ConfigReloaded += (_, _) => applied.TrySetResult();
+
+        var yaml2 = "- id: a\n  name: ./a\n  config:\n    mode: !!env MODE\n";
+        await WriteConfigAsync(ConfigPath, yaml2);
+        await (await Task.WhenAny(applied.Task, Task.Delay(TimeSpan.FromSeconds(30))));
+
+        var config = Assert.IsAssignableFrom<Dictionary<string, object?>>(host.DumpConfig().Single(e => e.Id == "a").Config);
+        Assert.Equal("prod", config["mode"]); // 插值已展开（修复前 = "!!env MODE" 字面）
+    }
+
+    [Fact]
+    public async Task Watcher_replays_config_patches_on_reload()
+    {
+        // P2-1（19 号审计 LD-10/IN-1）：外部改文件 → 回调重跑 ConfigPatches
+        //（修复前：patch 覆盖被文件回退——Cordis 每次 _apply 都 applyPatches）
+        var yaml1 = "- id: a\n  name: ./a\n  config:\n    k: 1\n";
+        await WriteConfigAsync(ConfigPath, yaml1);
+        var options = Options(ConfigPath);
+        options.ConfigPatches =
+        [
+            new(GroupId: null, Insert: null,
+                Overrides: new Dictionary<string, EntryOptions>
+                {
+                    ["a"] = new() { Id = "a", Name = "./a", Config = new Dictionary<string, object?> { ["k"] = 99 } },
+                }),
+        ];
+        await using var host = await StartAsync(yaml1, options);
+        var config = Assert.IsAssignableFrom<Dictionary<string, object?>>(host.DumpConfig().Single(e => e.Id == "a").Config);
+        Assert.Equal(99, config["k"]); // 启动期 patch 生效
+        host.EnableConfigWatch();
+
+        var applied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.ConfigReloaded += (_, _) => applied.TrySetResult();
+
+        var yaml2 = "- id: a\n  name: ./a\n  config:\n    k: 2\n";
+        await WriteConfigAsync(ConfigPath, yaml2);
+        await (await Task.WhenAny(applied.Task, Task.Delay(TimeSpan.FromSeconds(30))));
+
+        var reloaded = Assert.IsAssignableFrom<Dictionary<string, object?>>(host.DumpConfig().Single(e => e.Id == "a").Config);
+        Assert.Equal(99, reloaded["k"]); // patch 重放（修复前 = 2——文件值回退覆盖）
+    }
+
+    [Fact]
     public async Task Watcher_apply_does_not_write_back()
     {
         // CA-15（P61）防回环：文件已是新值——watcher 触发的 apply 不写回

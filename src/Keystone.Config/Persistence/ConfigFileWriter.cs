@@ -16,6 +16,7 @@ public class ConfigFileWriter : IDisposable
 
     private readonly string _path;
     private readonly Lock _lock = new();
+    private readonly SemaphoreSlim _writeGate = new(1, 1); // P0-5（19 号审计 IN-3）：写串行化——对齐 Cordis writeQueue 单消费
     private IReadOnlyList<EntryOptions>? _pending;
     private Timer? _debounce;
     private bool _readOnly;
@@ -93,6 +94,7 @@ public class ConfigFileWriter : IDisposable
             _debounce = null;
         }
 
+        _writeGate.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -108,7 +110,23 @@ public class ConfigFileWriter : IDisposable
         await WriteAsync(initial).ConfigureAwait(false);
     }
 
+    /// <summary>原子写入（重试 + 临时文件清理）。
+    /// P0-5：全程经 <see cref="_writeGate"/> 串行——Timer 防抖 FlushAsync 与显式
+    /// FlushAsync/WriteAsync 并发时不再竞写同一 .tmp（对齐 Cordis writeQueue 链式单消费）。</summary>
     private async Task WriteCoreAsync(string content)
+    {
+        await _writeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await WriteSerializedAsync(content).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    private async Task WriteSerializedAsync(string content)
     {
         for (var attempt = 0; ; attempt++)
         {

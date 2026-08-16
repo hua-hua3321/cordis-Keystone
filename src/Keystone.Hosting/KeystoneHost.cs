@@ -723,18 +723,14 @@ public sealed class KeystoneHost : IAsyncDisposable
         _suppressWriteBack = !save; // CA-15：save=false（watcher 路径）→ 子操作写回抑制（防回环）
         try
         {
-            var oldEntries = diff.ConfigChanged.Concat(diff.StructurallyChanged)
+            var oldEntries = diff.ConfigChanged.Concat(diff.StructurallyChanged.Select(c => c.Entry))
                 .Select(e => FindEntry(_tree, e.Id!))
                 .Where(e => e is not null)
                 .ToDictionary(e => e!.Id!, e => e!, StringComparer.Ordinal); // 变更前旧条目（回滚素材）
 
             await ApplyRemovedStageAsync(diff.Removed, failures, applied).ConfigureAwait(false);
 
-            await CollectPerItemAsync(diff.Added, failures, entry => ApplyAddedEntryAsync(entry, applied)).ConfigureAwait(false);
-
-            await CollectPerItemAsync(diff.DisabledFlips, failures, entry => ApplyDisabledFlipAsync(entry, applied)).ConfigureAwait(false);
-
-            // 结构变（两阶段，P57-T5）：阶段级收集（组替换与叶子重载共享树状态，逐条中断会留半替换树）
+            // 结构变更先于新增（P1-7）：叶↔组转换/跨组移动先落位——新增条目才能挂对新父
             await CollectStepAsync(failures, async () =>
             {
                 ThrowIfShuttingDown();
@@ -742,6 +738,10 @@ public sealed class KeystoneHost : IAsyncDisposable
                 // 不留半应用态（对齐 Cordis 失败全量重建）
                 await ApplyStructuralChangesAsync(diff.StructurallyChanged, oldEntries, applied).ConfigureAwait(false);
             }).ConfigureAwait(false);
+
+            await CollectPerItemAsync(diff.Added, failures, entry => ApplyAddedEntryAsync(entry, applied)).ConfigureAwait(false);
+
+            await CollectPerItemAsync(diff.DisabledFlips, failures, entry => ApplyDisabledFlipAsync(entry, applied)).ConfigureAwait(false);
 
             await CollectPerItemAsync(diff.ConfigChanged, failures,
                 entry => ApplyConfigEntryAsync(entry, oldEntries, applied, save)).ConfigureAwait(false);
@@ -918,24 +918,29 @@ public sealed class KeystoneHost : IAsyncDisposable
 
     /// <summary>结构变应用（两阶段，P57-T5）：先整体替换树——组级 isolate 声明先落位，
     /// 叶子重载时 BuildIsolateMap 读到的已是新谱系；再逐叶子冷重启（组条目本身无运行时）。</summary>
-    /// <summary>结构变更应用（CA-3 + P0-3）：逐条目"替换树 → 即刻登记 undo → 重载"——
-    /// 重载失败时树也已登记复原（修复前：undo 整步后统一登记 → 中途失败留半应用态）。</summary>
+    /// <summary>结构变更应用（CA-3 + P0-3 + P1-7）：逐条目"落位（移除旧位 + 按新谱系插入）→
+    /// 即刻登记 undo → 叶子重载"。P1-7：形状（叶↔组）与归属（跨组移动）入结构键——
+    /// 落位用新树 (parent, position)，undo 复原旧位置（对齐 entry.ts:194 group 变 = replace + tree.ts 移动记账）。</summary>
     private async Task ApplyStructuralChangesAsync(
-        IReadOnlyList<Keystone.Config.Entries.EntryOptions> changed,
+        IReadOnlyList<StructuralChange> changed,
         IReadOnlyDictionary<string, Keystone.Config.Entries.EntryOptions> oldEntries,
         List<Func<Task>> applied)
     {
-        foreach (var entry in changed)
+        foreach (var change in changed)
         {
             ThrowIfShuttingDown();
+            var entry = change.Entry;
             var oldEntry = oldEntries.GetValueOrDefault(entry.Id!);
-            ReplaceEntry(_tree, entry);
+            var (oldParent, oldIndex) = LocateEntry(_tree, entry.Id!);
+            RemoveFromTree(_tree, entry.Id!);
+            InsertEntry(_tree, entry, change.ParentId, change.Position);
             if (oldEntry is { } prev)
             {
                 var undoId = entry.Id!;
                 applied.Add(async () =>
                 {
-                    ReplaceEntry(_tree, prev);
+                    RemoveFromTree(_tree, undoId);
+                    InsertEntry(_tree, prev, oldParent, oldIndex);
                     if (!prev.IsGroup)
                     {
                         await ReloadPluginAsync(undoId).ConfigureAwait(false);
@@ -948,8 +953,24 @@ public sealed class KeystoneHost : IAsyncDisposable
                 PluginReloading?.Invoke(this, new PluginReloadingEventArgs(entry.Id!));
                 await ReloadPluginAsync(entry.Id!).ConfigureAwait(false);
             }
+            else
+            {
+                // P1-7：叶→组转换（或组结构变）——新挂子叶随组加载（Added 阶段的去重会跳过
+                // 已在树的子条目，加载责任在此）；已托管子叶不重复重启
+                foreach (var leaf in EnumerateActiveLeaves([entry]))
+                {
+                    if (!IsHosted(leaf.Id!))
+                    {
+                        await LoadEntryAsync(leaf).ConfigureAwait(false);
+                    }
+                }
+            }
         }
     }
+
+    /// <summary>条目当前是否已托管（运行中插件存在）。</summary>
+    private bool IsHosted(string id)
+        => _plugins.Any(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
 
     /// <summary>
     /// 启用配置文件监听（DC-9，08 §6 触发源）：文件变更（防抖合并）→ 重读文件 →
@@ -968,10 +989,14 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         _configWatcher = new ConfigFileWatcher(path, async () =>
         {
+            // P0-4/P2-1（19 号审计 LD-11/IN-2 + LD-10/IN-1）：与 StartAsync 同管线——
+            // 重读时重跑静态插值 + ConfigPatches（Cordis 每次 _apply 都 applyPatches；
+            // 修复前裸 Parse → !!env 字面注入、patch 覆盖被文件回退）
             var yaml = await File.ReadAllTextAsync(path).ConfigureAwait(false);
-            var tree = Keystone.Config.Entries.EntryParser.Parse(yaml);
+            var tree = Keystone.Config.Entries.EntryParser.Parse(yaml, BuildInterpolator());
+            var patched = ApplyConfigPatches(tree);
             // CA-15：文件已是新值——不写回（防回环写）
-            await ApplyConfigAsync(tree, save: false).ConfigureAwait(false);
+            await ApplyConfigAsync(patched, save: false).ConfigureAwait(false);
         });
     }
 
@@ -1153,23 +1178,69 @@ public sealed class KeystoneHost : IAsyncDisposable
             ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
         var updated = entry with { Disabled = disabled ? true : null };
 
-        var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
-        if (disabled)
+        if (updated.IsGroup)
         {
-            if (hosted is not null)
+            // P1-6（19 号审计 LD-13，对齐 entry.ts:88-98 + group.ts:108-112）：组翻转级联子叶——
+            // 修复前只动组条目：disable 子叶照跑；enable 子叶不恢复
+            if (disabled)
             {
-                EntryDisposing?.Invoke(this, new EntryDisposingEventArgs(id, active: true));
-                await hosted.Loader.DisposeAsync().ConfigureAwait(false); // 卸载（条目保留）
-                _plugins.Remove(hosted);
+                foreach (var leaf in EnumerateLeaves(updated.Group!))
+                {
+                    await DisposeHostedAsync(leaf.Id!).ConfigureAwait(false); // 级联卸载（树保留）
+                }
+            }
+            else if (!IsAnyAncestorDisabled(id))
+            {
+                foreach (var leaf in EnumerateActiveLeaves([updated]))
+                {
+                    await LoadEntryAsync(leaf).ConfigureAwait(false); // 级联恢复（失活子叶不复活）
+                }
             }
         }
-        else if (hosted is null && !updated.IsGroup)
+        else
         {
-            await LoadEntryAsync(updated).ConfigureAwait(false); // 改回即恢复（08 §3）
+            var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
+            if (disabled)
+            {
+                if (hosted is not null)
+                {
+                    EntryDisposing?.Invoke(this, new EntryDisposingEventArgs(id, active: true));
+                    await hosted.Loader.DisposeAsync().ConfigureAwait(false); // 卸载（条目保留）
+                    _plugins.Remove(hosted);
+                }
+            }
+            else if (hosted is null && !IsAnyAncestorDisabled(id))
+            {
+                // P1-6 旁路修复：祖先挂起时不得直载（修复前 disabled 组内叶单独 re-enable 绕过检查）
+                await LoadEntryAsync(updated).ConfigureAwait(false); // 改回即恢复（08 §3）
+            }
         }
 
         ReplaceEntry(_tree, updated);
         ScheduleWriteBack();
+    }
+
+    /// <summary>P1-6：谱系祖先挂起检查（任何祖先组 disabled → true）。</summary>
+    private bool IsAnyAncestorDisabled(string id)
+        => AncestorDisabled(_tree, id) ?? false;
+
+    /// <summary>递归找 id 的祖先链；返回是否有挂起祖先；null = 条目不在树（调用方已保证存在）。</summary>
+    private static bool? AncestorDisabled(IReadOnlyList<EntryOptions> entries, string id)
+    {
+        foreach (var entry in entries)
+        {
+            if (string.Equals(entry.Id, id, StringComparison.Ordinal))
+            {
+                return false; // 命中——本层无挂起祖先
+            }
+
+            if (entry.Group is { } children && AncestorDisabled(children, id) is { } found)
+            {
+                return found || entry.Disabled == true; // 深层结果 + 本组状态
+            }
+        }
+
+        return null;
     }
 
     private static IEnumerable<EntryOptions> EnumerateLeaves(IEnumerable<EntryOptions> entries)

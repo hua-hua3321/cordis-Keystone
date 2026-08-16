@@ -7,13 +7,13 @@ namespace Keystone.Hosting;
 /// （父组 id + 组内下标）——diff 扁平集丢失组谱系会把新增子叶插到根。</param>
 /// <param name="Removed">旧树有新树无（→ 卸载）。</param>
 /// <param name="ConfigChanged">仅 config 变（→ 热更新）。</param>
-/// <param name="StructurallyChanged">name/inject/group 变（→ 冷重启）。</param>
+/// <param name="StructurallyChanged">name/inject/isolate/形状（叶↔组）/归属（跨组移动）变（→ 冷重启，P1-7）。</param>
 /// <param name="DisabledFlips">disabled 翻转（→ 挂起/恢复）。</param>
 public sealed record ConfigDiff(
     IReadOnlyList<AddedEntry> Added,
     IReadOnlyList<string> Removed,
     IReadOnlyList<EntryOptions> ConfigChanged,
-    IReadOnlyList<EntryOptions> StructurallyChanged,
+    IReadOnlyList<StructuralChange> StructurallyChanged,
     IReadOnlyList<EntryOptions> DisabledFlips)
 {
     /// <summary>全部变更条目 id（诊断/事件负载）。</summary>
@@ -22,7 +22,7 @@ public sealed record ConfigDiff(
         .. Added.Select(e => e.Entry.Id!),
         .. Removed,
         .. ConfigChanged.Select(e => e.Id!),
-        .. StructurallyChanged.Select(e => e.Id!),
+        .. StructurallyChanged.Select(c => c.Entry.Id!),
         .. DisabledFlips.Select(e => e.Id!),
     ];
 

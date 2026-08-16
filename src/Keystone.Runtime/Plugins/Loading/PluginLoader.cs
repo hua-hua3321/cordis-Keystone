@@ -21,6 +21,8 @@ public sealed class PluginLoader : IAsyncDisposable
     private PluginAssemblyLoadContext _alc = null!;
     private PluginRuntime? _runtime;
     private WeakReference? _unloadedAlc;
+    private readonly Lock _disposeLock = new(); // P65 加固：Dispose/Reload 并发互斥
+    private bool _disposed;
 
     private readonly IReadOnlyDictionary<string, string>? _isolateMap;
 
@@ -63,10 +65,20 @@ public sealed class PluginLoader : IAsyncDisposable
         return loader;
     }
 
-    /// <summary>热重载：加载新版本（新 ALC + 新 runtime）→ 旧版本 quiesce + ALC.Unload（02 §7）。</summary>
+    /// <summary>热重载：加载新版本（新 ALC + 新 runtime）→ 旧版本 quiesce + ALC.Unload（02 §7）。
+    /// P65 加固：与 <see cref="DisposeAsync"/> 互斥——watcher 触发的 reload 与宿主 Shutdown 并发时
+    /// 旧实现两侧都过 null 检查 → 双 Unload/已清字段的 NRE。</summary>
     public async Task ReloadAsync(PluginSource source)
     {
         ArgumentNullException.ThrowIfNull(source);
+
+        lock (_disposeLock)
+        {
+            if (_disposed)
+            {
+                throw new KeystoneException(ErrorCode.LifecycleInvalidState, "loader is disposed");
+            }
+        }
 
         var oldRuntime = _runtime;
         var oldAlc = _alc;
@@ -85,18 +97,32 @@ public sealed class PluginLoader : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_alc is null)
+        PluginAssemblyLoadContext? alc;
+        PluginRuntime? runtime;
+        lock (_disposeLock)
         {
-            return; // 幂等（await using 二次调用安全）
+            if (_disposed)
+            {
+                return; // 幂等（含并发重入：恰一方进入执行体）
+            }
+
+            _disposed = true;
+            alc = _alc;
+            runtime = _runtime;
         }
 
-        if (_runtime is not null)
+        if (alc is null)
         {
-            await _runtime.StopAsync().ConfigureAwait(false);
+            return;
         }
 
-        _unloadedAlc ??= new WeakReference(_alc);
-        _alc.Unload();
+        if (runtime is not null)
+        {
+            await runtime.StopAsync().ConfigureAwait(false);
+        }
+
+        _unloadedAlc ??= new WeakReference(alc);
+        alc.Unload();
         _alc = null!; // 释放强引用，允许 GC 回收（否则 loader 字段引用阻塞卸载）
     }
 

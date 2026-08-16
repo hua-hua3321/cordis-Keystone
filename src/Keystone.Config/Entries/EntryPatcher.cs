@@ -7,7 +7,9 @@ namespace Keystone.Config.Entries;
 /// </summary>
 public static class EntryPatcher
 {
-    /// <summary>应用 patch 列表（顺序应用；空列表 = 恒等返回原引用）。</summary>
+    /// <summary>应用 patch 列表（顺序应用）。
+    /// P2-2（19 号审计 LD-12，对齐 include applyEntryPatches）：恒 detached（无 patch 也返回
+    /// 结构克隆——structuredClone 语义）；insert 与 overrides 互斥（insert 分支 continue）。</summary>
     public static IReadOnlyList<EntryOptions> Apply(
         IReadOnlyList<EntryOptions> tree,
         IReadOnlyList<EntryPatch> patches,
@@ -15,49 +17,77 @@ public static class EntryPatcher
     {
         ArgumentNullException.ThrowIfNull(tree);
         ArgumentNullException.ThrowIfNull(patches);
+
+        var entries = tree.Select(CloneEntry).ToList(); // P2-2a：恒 detached（不共享入参可变性）
         if (patches.Count == 0)
         {
-            return tree; // 恒等（同引用）
+            return entries;
         }
 
-        var entries = tree.ToList(); // 拷贝应用（不变异入参）
         foreach (var patch in patches)
         {
-            ApplyInsert(entries, patch, onWarn);
+            if (ApplyInsert(entries, patch, onWarn))
+            {
+                continue; // P2-2c：insert 与 overrides 互斥（对齐 include insert 分支 continue）
+            }
+
             ApplyOverrides(entries, patch, onWarn);
         }
 
         return entries;
     }
 
-    private static void ApplyInsert(List<EntryOptions> entries, EntryPatch patch, Action<string>? onWarn)
+    /// <summary>结构克隆（组递归；字典/列表浅拷贝一层——Config 深度任意对象不可克隆，共享引用）。</summary>
+    private static EntryOptions CloneEntry(EntryOptions entry)
+    {
+        var isolate = entry.Isolate.Count == 0
+            ? new Dictionary<string, IsolateSpec>(StringComparer.Ordinal)
+            : new Dictionary<string, IsolateSpec>(entry.Isolate, StringComparer.Ordinal);
+        return new EntryOptions
+        {
+            Id = entry.Id,
+            Name = entry.Name,
+            Config = entry.Config is Dictionary<string, object?> dict
+                ? new Dictionary<string, object?>(dict, StringComparer.Ordinal)
+                : entry.Config,
+            Inject = entry.Inject is null ? [] : [.. entry.Inject],
+            Isolate = isolate,
+            Disabled = entry.Disabled,
+            Insert = entry.Insert,
+            Group = entry.Group is null ? null : entry.Group.Select(CloneEntry).ToList(),
+        };
+    }
+
+    /// <summary>插入应用；返回是否走了 insert 分支（互斥判定）。</summary>
+    private static bool ApplyInsert(List<EntryOptions> entries, EntryPatch patch, Action<string>? onWarn)
     {
         if (patch.Insert is not { Count: > 0 } insert)
         {
-            return;
+            return false;
         }
 
         if (patch.GroupId is null)
         {
             entries.AddRange(insert); // 插入根
-            return;
+            return true;
         }
 
         var index = entries.FindIndex(e => string.Equals(e.Id, patch.GroupId, StringComparison.Ordinal));
         if (index < 0)
         {
             onWarn?.Invoke($"patch group not found: {patch.GroupId}"); // 跳过 + 警告（对齐 name 不匹配跳过）
-            return;
+            return true;
         }
 
         var group = entries[index];
         if (group.Group is null)
         {
             onWarn?.Invoke($"patch target is not a group: {patch.GroupId}");
-            return;
+            return true;
         }
 
         entries[index] = group with { Group = [.. group.Group, .. insert] };
+        return true;
     }
 
     private static void ApplyOverrides(List<EntryOptions> entries, EntryPatch patch, Action<string>? onWarn)

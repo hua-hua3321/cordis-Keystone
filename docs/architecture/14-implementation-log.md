@@ -1040,6 +1040,19 @@ created: 2026-08-15
 | T7 回归 | 全量 6 套件 | 新增 12 测试 | 425/425（4 轮 + 5 轮复跑全绿）；Hosting AOT 零 IL 警告 | ✔ |
 | T8 测试加固 | PluginFileWatchTests 收尾改轮询 + 容忍 reload 瞬态窗口（旧已卸新未挂）；HostRetentionTests 停后静止双采样（在途回调落地窗口） | 两测试文件 | 5 轮全量无抖动 | ✔ |
 
+#### W65-01 P65：配置管线批（19 §1/§2/§4：P0-4 + P0-5 + P1-6 + P1-7 + P2-1 + P2-2 + P2-9）
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| T1 watcher 同管线（P0-4/P2-1） | EnableConfigWatch 回调补 BuildInterpolator + ApplyConfigPatches——与 StartAsync 完全同管线（对齐 Cordis 每次 _apply 重跑 patch/插值；修复前裸 Parse → !!env 字面注入 + patch 覆盖被文件回退） | KeystoneHost.cs | Watcher_replays_interpolation/config_patches 2 例（红→绿） | ✔ |
+| T2 写串行化（P0-5） | ConfigFileWriter 增 _writeGate SemaphoreSlim(1,1)——WriteCoreAsync 全程串行（Timer 防抖 Flush 与显式 Flush/Write 并发不再竞写同一 .tmp；对齐 Cordis writeQueue 链式单消费） | ConfigFileWriter.cs | WriteSerializationTests 2 例（门闩式确定性验证：第二写在第一写完成前不得进入原子步） | ✔ |
+| T3 disabled 级联（P1-6） | SetEntryDisabledAsync 组翻转级联子叶（disable → EnumerateLeaves 全卸；enable → EnumerateActiveLeaves 恢复）+ IsAnyAncestorDisabled 祖先检查（disabled 组内叶单独 re-enable 不再绕过直载；对齐 entry.ts:88-98 + group.ts:108-112） | KeystoneHost.cs | Group_disable_runtime_flip_cascades + Re_enable_inside_disabled_group 2 例 | ✔ |
+| T4 形状/归属结构键（P1-7） | ConfigDiffer.StructuralKey 入 ParentId + IsGroup 形状 + Flatten 携带父 id；StructurallyChanged → StructuralChange(Entry, ParentId, Position)；应用侧"移除旧位 + 新谱系落位"（跨组移动检出+应用，叶↔组转换检出）；结构阶段先于 Added（父先落位）；组结构变加载未托管新子叶 | ConfigDiffer.cs/ConfigDiff.cs/StructuralChange.cs（新建）/KeystoneHost.cs | Leaf_to_group_conversion_loads_children + Diff_applies_move_between_groups 2 例 | ✔ |
+| T5 EntryPatcher 对齐（P2-2） | a) 恒 detached（CloneEntry 结构克隆——组递归/字典拷贝；对齐 structuredClone）；c) insert 与 overrides 互斥（对齐 include insert 分支 continue）；b) bool? Disabled false 清除语义核实已正确（`??` 对 false 不短路）——Config null 清除受 C# 类型系统限制（null=未提供），注记 12 §11.1 | EntryPatcher.cs | EntryPatcherAlignmentTests 3 例 + Empty_patches 语义更新（同引用恒等 → 内容恒等 detached） | ✔ |
+| T6 EntryGroup 死代码删除（P2-9） | standalone EntryGroup.cs + EntryGroupTests 删除（其回滚语义与宿主实现相反——双实现漂移风险；宿主 ApplyDiffTransactionallyAsync 为唯一真源） | -2 文件 | 构建/全量绿 | ✔ |
+| T7 回归 | 全量 6 套件 | 新增 11 测试（净 +10：删 EntryGroupTests 5） | 431/431；Hosting AOT 零 IL 警告 | ✔ |
+| T8 并发加固（回归期发现） | PluginLoader.DisposeAsync/ReloadAsync 互斥（_disposeLock + _disposed 一次性进入）——watcher 触发的 reload 与宿主 Shutdown 并发时旧实现两侧都过 null 检查 → 已清字段 NRE（全量并行下 ~1/4 复现） | PluginLoader.cs | Hosting 套件连跑 6 轮 + 全量并行多轮零复现 | ✔ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |
