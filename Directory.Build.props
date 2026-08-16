@@ -27,4 +27,22 @@
     <!-- 包引用集中管理（版本见 Directory.Packages.props） -->
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
+  <!-- NuGet 包公共元数据（publish.yml 打 tag 时以 -p:Version 覆盖版本） -->
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <Authors>Keystone contributors</Authors>
+    <Copyright>Copyright (c) 2026 Keystone contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/hua-hua3321/cordis-Keystone</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/hua-hua3321/cordis-Keystone.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>plugin;plugin-framework;hot-reload;middleware;configuration;dotnet</PackageTags>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <!-- 仓库根 README 打入每个包（六工程均两级深） -->
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Condition="Exists('..\..\README.md')" />
+  </ItemGroup>
 </Project>
