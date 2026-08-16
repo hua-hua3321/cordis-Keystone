@@ -87,7 +87,7 @@ created: 2026-08-16
 2. `EnablePluginWatch()` 宿主 API（与 EnableConfigWatch 对称，opt-in；随 Dispose 停）
 3. TDD：临时目录插件文件改写 → PluginReloading 事件 + loader 程序集实例变化（热替换凭证）；无匹配条目的文件变更 = 无操作
 
-### CA-3 组级事务：并行应用 + 聚合 + 回滚（P1，M）
+### CA-3 组级事务：并行应用 + 聚合 + 回滚（P1，M）——✅ 已实施（P59-T1，2026-08-16；见 14 §7.59：逐条目失败收集聚合 + 逆序回滚 + Disposal owns termination；组内依赖拓扑分层并行未做——门控 PENDING 等待已天然拓扑序，并行留待性能需求）
 
 **研判**：group.ts:59-118 全事务语义（allSettled 并行/单错抛因/多错 AggregateError/逆序回滚新建+重建旧/回滚失败聚合/"Disposal owns termination"）。Keystone `ApplyConfigAsync` 顺序、首错中断、无回滚。**但 diff 增量模式下回滚面更小**（旧条目未动无需重建，只需撤销本次新增/变更）。
 
@@ -97,7 +97,7 @@ created: 2026-08-16
 3. 树卸载短路：`ThrowIfShuttingDown` 检查点进每步（卸载中的组更新不回滚——对齐 Disposal owns termination）
 4. TDD：组内 2 新增 1 失败 → 2 个均回滚（DumpConfig 复原 + 插件不在 _plugins）；双失败 → AggregateException 含 2 内因；回滚失败 → 聚合上抛
 
-### CA-4 组合 update（config+移动+position 一步）（P1，S）
+### CA-4 组合 update（config+移动+position 一步）（P1，S）——✅ 已实施（P59-T2，2026-08-16；见 14 §7.59：UpdateEntryAsync 热/冷路径 + (源父,原下标) 精确回插）
 
 **研判**：tree.ts:114-143 一次调用改选项+跨组移动+position，双段回滚。Keystone 只有分离的 MoveEntryAsync（回滚仅回根）与 UpdatePluginAsync。
 

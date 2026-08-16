@@ -927,6 +927,25 @@ created: 2026-08-15
 | W58-T1-03 | 修复引入的语义回归：MountAsync（H2 编程式挂载）不进树——RemoveEntryAsync 初版 FindEntry 空检查误伤树外托管插件卸载（MountAsync_programmatic 测试红）；改宽容语义（仅树内组走级联解析，树外直接卸载） | 修复 | MountAsync 测试恢复绿 | ✅ |
 | W58-T1-04 | 全量回归 382/382（Hosting 57→62：+5）；Hosting AOT 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
 
+### 7.59 P59 CA-3 组级事务 + CA-4 组合 update（TDD）
+
+> 目标：按 18 §2 提案实施 P1 两项。TDD 红→绿 + 全量回归 + AOT 冒烟 + 文档回写 + 独立提交。
+
+| 任务 | 目标（严禁简化） | 影响范围 | 验收标准 | 状态 |
+|------|----------------|---------|---------|------|
+| T1 CA-3 事务化 | ApplyConfigAsync 事务化：逐条目失败收集（单错抛因/多错 AggregateException）+ 逆序回滚（Added→Remove/Config→旧值/Structural→旧条目+Reload/Flip→翻回）+ 回滚失败聚合 + ThrowIfShuttingDown 每步 | KeystoneHost（ApplyDiffTransactionallyAsync + CollectPerItemAsync/CollectStepAsync + 阶段 appliers） | 4 新测试（失败回滚新增兄弟/双失败聚合/正向全载/回滚 config 旧值） | ✔ 2026-08-16 |
+| T2 CA-4 组合 update | UpdateEntryAsync(id, options, parent, position)：结构键+parent 判定热/冷路径；移动记账 (源父, 原下标) 失败回插精确原位（修 MoveEntry 回滚只回根） | KeystoneHost（UpdateEntryAsync/ApplyEntryUpdateAsync/RestoreEntry/LocateEntry） | 4 新测试（移动+config 一步/纯 config 热路径/结构变冷路径/失败回原下标） | ✔ 2026-08-16 |
+
+#### T1-T2 执行记录（2026-08-16）
+
+| # | 内容 | 方式 | 验证 | 状态 |
+|---|------|------|------|------|
+| W59-01 | 红测试 8 个：GroupTransactionTests 4（初红：回滚缺失 → 半应用树）+ UpdateEntryTests 4（初红：API 不存在，构译期） | TDD | filter 跑 Failed | ✅ |
+| W59-02 | CA-3 实现：ApplyDiffTransactionallyAsync（oldEntries 回滚素材 + 五阶段）+ CollectPerItemAsync（逐条目 allSettled 语义——一条失败不阻断同批其余）+ CollectStepAsync（结构变阶段级）+ RollbackAsync（逆序 + 聚合 + CA1031 pragma 豁免）；每步 ThrowIfShuttingDown | 实现 | 8/8 绿 | ✅ |
+| W59-03 | CA-4 实现：UpdateEntryAsync + ApplyEntryUpdateAsync（冷路径直接重载/热路径 PatchContext 瀑布）+ RestoreEntry（moved→移回原位再回旧值）+ LocateEntry((父, 下标) 定位)；树 helpers 签名统一 | 实现 | — | ✅ |
+| W59-04 | 中途修正：初版阶段级收集致同批第二失败被吞（AggregateException 只剩 1 因）——改逐条目粒度收集（对齐 Cordis allSettled）；测试自身 bug：同 id 坏源×2 在 YAML 解析期被拦（fail-fast 先于应用层）→ 改双 id | 修复 | 双失败聚合 2 内因 | ✅ |
+| W59-05 | 全量回归 390/390（Hosting 62→70：+8）；Hosting AOT 零 IL；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |

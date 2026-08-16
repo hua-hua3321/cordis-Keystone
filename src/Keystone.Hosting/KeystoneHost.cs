@@ -433,6 +433,116 @@ public sealed class KeystoneHost : IAsyncDisposable
         }).ConfigureAwait(false);
     }
 
+    /// <summary>组合更新（CA-4，P59，对齐 Cordis tree.update）：一次调用改选项 + 跨组移动 + position。
+    /// 判定：结构键（name/inject/isolate）与 parent 均不变 → 热路径（PatchContext 瀑布 + 热更新）；
+    /// 结构变或跨组 → 冷路径（冷重启）。移动记账 (源组, 原下标)——任一步失败回插原位置
+    /// （修复 MoveEntryAsync 回滚只回根的偏差）。</summary>
+    public async Task UpdateEntryAsync(string id, Keystone.Config.Entries.EntryOptions options, string? parent = null, int? position = null)
+    {
+        ThrowIfShuttingDown();
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentNullException.ThrowIfNull(options);
+
+        var current = FindEntry(_tree, id)
+            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
+        if (parent is not null && FindEntry(_tree, parent) is not { } parentEntry)
+        {
+            throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"parent group not found: {parent}");
+        }
+
+        var updated = options with { Id = id };
+        var structuralChanged = !string.Equals(StructuralKeyOf(current), StructuralKeyOf(updated), StringComparison.Ordinal);
+        var (sourceParent, sourceIndex) = LocateEntry(_tree, id);
+        var parentChanged = !string.Equals(sourceParent, parent, StringComparison.Ordinal);
+
+        // 移动记账：(源父 id, 原下标)——失败回插精确原位
+        var moved = false;
+        if (parentChanged)
+        {
+            RemoveFromTree(_tree, id);
+            try
+            {
+                InsertEntry(_tree, updated, parent, position);
+                moved = true;
+            }
+            catch (Exception)
+            {
+                InsertEntry(_tree, current, sourceParent, sourceIndex); // 回插原位置（非根）
+                throw;
+            }
+        }
+
+        try
+        {
+            await ApplyEntryUpdateAsync(id, updated, structuralChanged || parentChanged).ConfigureAwait(false);
+            ScheduleWriteBack();
+        }
+        catch (Exception)
+        {
+            RestoreEntry(id, current, moved, sourceParent, sourceIndex);
+            throw;
+        }
+    }
+
+    /// <summary>热/冷路径执行（CA-4）：结构变或跨组 → 冷重启；否则 PatchContext 瀑布热更新。</summary>
+    private async Task ApplyEntryUpdateAsync(string id, Keystone.Config.Entries.EntryOptions updated, bool coldPath)
+    {
+        if (coldPath)
+        {
+            ReplaceEntry(_tree, updated);
+            PluginReloading?.Invoke(this, new PluginReloadingEventArgs(id));
+            await ReloadPluginAsync(id).ConfigureAwait(false);
+            return;
+        }
+
+        await PatchContextAsync(updated, async () =>
+        {
+            ReplaceEntry(_tree, updated);
+            await ReloadPluginAsync(id).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>失败复原（CA-4）：已移动 → 移回原位再回旧值；未移动 → 原地回旧值。</summary>
+    private void RestoreEntry(string id, Keystone.Config.Entries.EntryOptions current, bool moved, string? sourceParent, int sourceIndex)
+    {
+        if (moved)
+        {
+            RemoveFromTree(_tree, id);
+            InsertEntry(_tree, current, sourceParent, sourceIndex);
+        }
+        else
+        {
+            ReplaceEntry(_tree, current);
+        }
+    }
+
+    /// <summary>条目结构键（与 ConfigDiffer 同语义：name/inject/isolate 生效域；CA-4 判定用）。</summary>
+    private static string StructuralKeyOf(Keystone.Config.Entries.EntryOptions e)
+        => $"{e.Name}|{string.Join(",", e.Inject)}";
+
+    /// <summary>定位条目 (父组 id, 组内下标)；根级 = (null, 根下标)；未找到 = (null, -1)。</summary>
+    private static (string? Parent, int Index) LocateEntry(IReadOnlyList<Keystone.Config.Entries.EntryOptions> entries, string id, string? parent = null)
+    {
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (string.Equals(entries[i].Id, id, StringComparison.Ordinal))
+            {
+                return (parent, i);
+            }
+
+            if (entries[i].Group is { } children)
+            {
+                var nested = LocateEntry(children, id, entries[i].Id);
+                if (nested.Index != -1)
+                {
+                    return nested;
+                }
+            }
+        }
+
+        return (null, -1);
+    }
+
     // ── DC-9：文件变更 → 重载 → diff → 逐条目更新（08 §6 触发管线）──
 
     /// <summary>配置重载完成（diff 后；负载 = 变更条目 id 集）。</summary>
@@ -468,40 +578,155 @@ public sealed class KeystoneHost : IAsyncDisposable
                 return; // deepEqual 相等即跳过（08 §6.1）
             }
 
-            // 移除 → 卸载
-            foreach (var id in diff.Removed)
-            {
-                await RemoveEntryAsync(id).ConfigureAwait(false);
-            }
-
-            // 新增 → 加载
-            foreach (var entry in diff.Added)
-            {
-                await CreateEntryAsync(entry).ConfigureAwait(false);
-            }
-
-            // disabled 翻转 → 挂起/恢复
-            foreach (var entry in diff.DisabledFlips)
-            {
-                await SetEntryDisabledAsync(entry.Id!, entry.Disabled == true).ConfigureAwait(false);
-            }
-
-            // 结构变 → 冷重启（两阶段，P57-T5）
-            await ApplyStructuralChangesAsync(diff.StructurallyChanged).ConfigureAwait(false);
-
-            // 仅 config 变 → 热更新（瀑布可否决；内部含写回）
-            foreach (var entry in diff.ConfigChanged)
-            {
-                PluginUpdating?.Invoke(this, new PluginUpdatingEventArgs(entry.Id!, entry.Config));
-                await UpdatePluginAsync(entry.Id!, entry.Config).ConfigureAwait(false);
-            }
-
+            await ApplyDiffTransactionallyAsync(diff).ConfigureAwait(false);
             ConfigReloaded?.Invoke(this, new ConfigReloadedEventArgs(diff.ChangedIds));
         }
         finally
         {
             _applyingConfig = false;
         }
+    }
+
+    /// <summary>diff 事务应用（CA-3，P59）：各阶段收集失败——单错抛原因、多错 AggregateException；
+    /// 任一失败 → 逆序撤销本次已成功的变更；回滚失败聚合进同一异常上抛
+    /// （对齐 Cordis group 事务；diff 增量模式下回滚面更小——旧条目未动无需重建）。
+    /// 每步前 ThrowIfShuttingDown（Disposal owns termination：卸载中的组更新不回滚）。</summary>
+    private async Task ApplyDiffTransactionallyAsync(ConfigDiff diff)
+    {
+        var applied = new List<Func<Task>>(); // 逆序回滚动作栈（成功一步记一步）
+        var failures = new List<Exception>();
+        var oldEntries = diff.ConfigChanged.Concat(diff.StructurallyChanged)
+            .Select(e => FindEntry(_tree, e.Id!))
+            .Where(e => e is not null)
+            .ToDictionary(e => e!.Id!, e => e!, StringComparer.Ordinal); // 变更前旧条目（回滚素材）
+
+        await CollectPerItemAsync(diff.Removed, failures, async id =>
+        {
+            ThrowIfShuttingDown();
+            await RemoveEntryAsync(id).ConfigureAwait(false); // 删除不回滚重建（旧树在调用方）
+        }).ConfigureAwait(false);
+
+        await CollectPerItemAsync(diff.Added, failures, entry => ApplyAddedEntryAsync(entry, applied)).ConfigureAwait(false);
+
+        await CollectPerItemAsync(diff.DisabledFlips, failures, entry => ApplyDisabledFlipAsync(entry, applied)).ConfigureAwait(false);
+
+        // 结构变（两阶段，P57-T5）：阶段级收集（组替换与叶子重载共享树状态，逐条中断会留半替换树）
+        await CollectStepAsync(failures, async () =>
+        {
+            ThrowIfShuttingDown();
+            await ApplyStructuralChangesAsync(diff.StructurallyChanged).ConfigureAwait(false);
+            foreach (var entry in diff.StructurallyChanged)
+            {
+                if (oldEntries.GetValueOrDefault(entry.Id!) is { } oldEntry)
+                {
+                    applied.Add(async () =>
+                    {
+                        ReplaceEntry(_tree, oldEntry);
+                        await ReloadPluginAsync(oldEntry.Id!).ConfigureAwait(false);
+                    });
+                }
+            }
+        }).ConfigureAwait(false);
+
+        await CollectPerItemAsync(diff.ConfigChanged, failures, entry => ApplyConfigEntryAsync(entry, oldEntries, applied)).ConfigureAwait(false);
+
+        if (failures.Count > 0)
+        {
+            await RollbackAsync(applied, failures).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>新增条目应用（CA-3）：成功记回滚（RemoveEntryAsync）。</summary>
+    private async Task ApplyAddedEntryAsync(EntryOptions entry, List<Func<Task>> applied)
+    {
+        ThrowIfShuttingDown();
+        await CreateEntryAsync(entry).ConfigureAwait(false);
+        var addedId = entry.Id!;
+        applied.Add(() => RemoveEntryAsync(addedId));
+    }
+
+    /// <summary>disabled 翻转应用（CA-3）：成功记翻回原值。</summary>
+    private async Task ApplyDisabledFlipAsync(EntryOptions entry, List<Func<Task>> applied)
+    {
+        ThrowIfShuttingDown();
+        await SetEntryDisabledAsync(entry.Id!, entry.Disabled == true).ConfigureAwait(false);
+        var flipId = entry.Id!;
+        var flipBack = entry.Disabled != true;
+        applied.Add(() => SetEntryDisabledAsync(flipId, flipBack));
+    }
+
+    /// <summary>热更新应用（CA-3，瀑布可否决）：成功记回滚（旧 config）。</summary>
+    private async Task ApplyConfigEntryAsync(
+        EntryOptions entry,
+        IReadOnlyDictionary<string, EntryOptions> oldEntries,
+        List<Func<Task>> applied)
+    {
+        ThrowIfShuttingDown();
+        PluginUpdating?.Invoke(this, new PluginUpdatingEventArgs(entry.Id!, entry.Config));
+        await UpdatePluginAsync(entry.Id!, entry.Config).ConfigureAwait(false);
+        var oldConfig = oldEntries.GetValueOrDefault(entry.Id!)?.Config;
+        var changedId = entry.Id!;
+        applied.Add(() => UpdatePluginAsync(changedId, oldConfig));
+    }
+
+    /// <summary>逐条目执行 + 失败收集（CA-3：一条失败不阻断同批其余条目——对齐 Cordis allSettled 并行语义）。</summary>
+    private static async Task CollectPerItemAsync<T>(
+        IReadOnlyList<T> items, List<Exception> failures, Func<T, Task> action)
+    {
+        foreach (var item in items)
+        {
+            try
+            {
+                await action(item).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failures.Add(ex);
+            }
+        }
+    }
+
+    /// <summary>单阶段执行 + 失败收集（CA-3：异常经列表上抛聚合，不吞——与 ConfigFileWatcher 同款豁免）。</summary>
+    private static async Task CollectStepAsync(
+        List<Exception> failures, Func<Task> step)
+    {
+#pragma warning disable CA1031 // 事务应用链可抛任意异常（编译/校验/加载），收集聚合是本方法职责
+        try
+        {
+            await step().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            failures.Add(ex);
+        }
+#pragma warning restore CA1031
+    }
+
+
+
+
+
+
+    /// <summary>逆序回滚：撤销本次已成功变更；回滚失败聚合进原失败列表一起上抛（CA-3，P59）。</summary>
+    private static async Task RollbackAsync(List<Func<Task>> applied, List<Exception> failures)
+    {
+        for (var i = applied.Count - 1; i >= 0; i--)
+        {
+#pragma warning disable CA1031 // 回滚链可抛任意异常，聚合上抛是本方法职责（不吞）
+            try
+            {
+                await applied[i]().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                failures.Add(ex); // 回滚失败聚合（不吞）
+            }
+#pragma warning restore CA1031
+        }
+
+        throw failures.Count == 1
+            ? failures[0]
+            : new AggregateException(failures);
     }
 
     /// <summary>结构变应用（两阶段，P57-T5）：先整体替换树——组级 isolate 声明先落位，
