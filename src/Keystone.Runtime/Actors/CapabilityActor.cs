@@ -32,7 +32,8 @@ internal sealed partial class CapabilityActor : IActor
     private TaskResultEnvelope? _currentResult;
 
     // DC-13（06 §4 幂等契约）：TaskId 即幂等键——重复投递/重试返回缓存结果（不重执行副作用）
-    private const int ResultCacheCapacity = 1024;
+    /// <summary>DC-13 结果缓存容量默认值（P71-T2 入构造参数——历史硬编码常量 1024）。</summary>
+    private const int DefaultResultCacheCapacity = 1024;
     private readonly Dictionary<Guid, TaskResultEnvelope> _results = [];
     private readonly Queue<Guid> _resultOrder = new();
 
@@ -42,7 +43,8 @@ internal sealed partial class CapabilityActor : IActor
         IReadOnlyList<IMiddleware>? middlewares = null,
         Keystone.Runtime.Context.IContext? parentContext = null,
         Keystone.Runtime.Persistence.IEventStore? eventStore = null,
-        TimeSpan? slowRequestThreshold = null)
+        TimeSpan? slowRequestThreshold = null,
+        int? resultCacheCapacity = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
         ArgumentNullException.ThrowIfNull(handler);
@@ -55,9 +57,12 @@ internal sealed partial class CapabilityActor : IActor
         _pipeline = BuildPipeline(middlewares ?? []);
         // P70-T3：慢请求阈值（宿主 Observability 下传；null = 框架默认 5s）
         _slowRequestThreshold = slowRequestThreshold ?? TimeSpan.FromSeconds(5);
+        // P71-T2：结果缓存容量（宿主配置下传；null = 框架默认 1024）
+        _resultCacheCapacity = resultCacheCapacity ?? DefaultResultCacheCapacity;
     }
 
     private readonly TimeSpan _slowRequestThreshold;
+    private readonly int _resultCacheCapacity;
 
     /// <summary>实例名（事实事件 Capability 维度）。</summary>
     internal string InstanceName { get; }
@@ -336,7 +341,7 @@ internal sealed partial class CapabilityActor : IActor
     /// <summary>DC-13：结果缓存（FIFO 容量上限，防无界增长）。</summary>
     private void RecordResult(Guid taskId, TaskResultEnvelope result)
     {
-        if (_results.Count >= ResultCacheCapacity && _results.ContainsKey(taskId) is false)
+        if (_results.Count >= _resultCacheCapacity && _results.ContainsKey(taskId) is false)
         {
             var oldest = _resultOrder.Dequeue();
             _results.Remove(oldest);

@@ -7,15 +7,17 @@ namespace Keystone.Hosting;
 /// </summary>
 public sealed class ConfigFileWatcher : IDisposable
 {
-    private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(100);
-
+    private readonly TimeSpan _debounceDelay;
     private readonly FileSystemWatcher _watcher;
     private readonly Func<Task> _onChanged;
     private readonly Lock _lock = new();
     private Timer? _debounce;
     private bool _disposed;
 
-    public ConfigFileWatcher(string path, Func<Task> onChanged)
+    /// <summary>防抖窗口（P71-T2 入配置面；测试/诊断探针）。</summary>
+    internal TimeSpan DebounceDelay => _debounceDelay;
+
+    public ConfigFileWatcher(string path, Func<Task> onChanged, TimeSpan? debounce = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(onChanged);
@@ -27,6 +29,7 @@ public sealed class ConfigFileWatcher : IDisposable
                 $"config watch directory not found: {path}");
         }
 
+        _debounceDelay = debounce ?? TimeSpan.FromMilliseconds(100);
         _onChanged = onChanged;
         _watcher = new FileSystemWatcher(directory)
         {
@@ -48,7 +51,7 @@ public sealed class ConfigFileWatcher : IDisposable
             }
 
             _debounce?.Dispose();
-            _debounce = new Timer(_ => _ = InvokeAsync(), null, Debounce, Timeout.InfiniteTimeSpan);
+            _debounce = new Timer(_ => _ = InvokeAsync(), null, _debounceDelay, Timeout.InfiniteTimeSpan);
         }
     }
 

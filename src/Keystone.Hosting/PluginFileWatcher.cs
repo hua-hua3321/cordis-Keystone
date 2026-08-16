@@ -7,8 +7,7 @@ namespace Keystone.Hosting;
 /// </summary>
 public sealed class PluginFileWatcher : IDisposable
 {
-    private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(100);
-
+    private readonly TimeSpan _debounceDelay;
     private readonly FileSystemWatcher _watcher;
     private readonly Func<string, Task> _onChanged;
     private readonly Lock _lock = new();
@@ -16,7 +15,10 @@ public sealed class PluginFileWatcher : IDisposable
     private string? _pendingFile;
     private bool _disposed;
 
-    public PluginFileWatcher(string rootDirectory, Func<string, Task> onChanged)
+    /// <summary>防抖窗口（P71-T2 入配置面；测试/诊断探针）。</summary>
+    internal TimeSpan DebounceDelay => _debounceDelay;
+
+    public PluginFileWatcher(string rootDirectory, Func<string, Task> onChanged, TimeSpan? debounce = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootDirectory);
         ArgumentNullException.ThrowIfNull(onChanged);
@@ -27,6 +29,7 @@ public sealed class PluginFileWatcher : IDisposable
                 $"plugin watch directory not found: {rootDirectory}");
         }
 
+        _debounceDelay = debounce ?? TimeSpan.FromMilliseconds(100);
         _onChanged = onChanged;
         _watcher = new FileSystemWatcher(rootDirectory)
         {
@@ -52,7 +55,7 @@ public sealed class PluginFileWatcher : IDisposable
 
             _pendingFile = file; // 防抖合并：末次变更文件生效
             _debounce?.Dispose();
-            _debounce = new Timer(_ => _ = InvokeAsync(), null, Debounce, Timeout.InfiniteTimeSpan);
+            _debounce = new Timer(_ => _ = InvokeAsync(), null, _debounceDelay, Timeout.InfiniteTimeSpan);
         }
     }
 

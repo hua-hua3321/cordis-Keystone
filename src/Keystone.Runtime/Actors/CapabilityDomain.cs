@@ -20,18 +20,21 @@ public sealed class CapabilityDomain : IAsyncDisposable
 
     private readonly Action<SupervisionDecision>? _onSupervision;
     private readonly TimeSpan? _defaultSlowThreshold;
+    private readonly int? _defaultResultCacheCapacity; // P71-T2：DC-13 结果缓存容量默认（宿主配置下传）
     private readonly List<(string Name, IEventStore? Store)> _spawned = []; // P70-T5：spawn 实例记账（停止时发 ActorStoppedFact）
 
     private CapabilityDomain(
         ActorSystem system, string name, bool ownsSystem,
         Action<SupervisionDecision>? onSupervision = null,
-        TimeSpan? defaultSlowThreshold = null)
+        TimeSpan? defaultSlowThreshold = null,
+        int? defaultResultCacheCapacity = null)
     {
         _system = system;
         _name = name;
         _ownsSystem = ownsSystem;
         _onSupervision = onSupervision;
         _defaultSlowThreshold = defaultSlowThreshold;
+        _defaultResultCacheCapacity = defaultResultCacheCapacity;
     }
 
     /// <summary>监督决策通知（P70-T3，ADR-0018）：Restart/Stop 决策 + 原因——宿主据此发事实/接线告警。</summary>
@@ -43,21 +46,24 @@ public sealed class CapabilityDomain : IAsyncDisposable
         "CA2000",
         Justification = "ActorSystem 所有权转移给 CapabilityDomain，由本域 DisposeAsync 统一释放")]
     public static CapabilityDomain Create(
-        string name, Action<SupervisionDecision>? onSupervision = null, TimeSpan? slowRequestThreshold = null)
+        string name, Action<SupervisionDecision>? onSupervision = null, TimeSpan? slowRequestThreshold = null,
+        int? resultCacheCapacity = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return new CapabilityDomain(new ActorSystem(), name, ownsSystem: true, onSupervision, slowRequestThreshold);
+        return new CapabilityDomain(
+            new ActorSystem(), name, ownsSystem: true, onSupervision, slowRequestThreshold, resultCacheCapacity);
     }
 
     /// <summary>
     /// 创建能力域并注入既有 ActorSystem（测试缝 / 多域共享系统场景；调用方负责 system 生命周期）。
     /// </summary>
     public static CapabilityDomain Attach(
-        ActorSystem system, string name, Action<SupervisionDecision>? onSupervision = null, TimeSpan? slowRequestThreshold = null)
+        ActorSystem system, string name, Action<SupervisionDecision>? onSupervision = null,
+        TimeSpan? slowRequestThreshold = null, int? resultCacheCapacity = null)
     {
         ArgumentNullException.ThrowIfNull(system);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return new CapabilityDomain(system, name, ownsSystem: false, onSupervision, slowRequestThreshold);
+        return new CapabilityDomain(system, name, ownsSystem: false, onSupervision, slowRequestThreshold, resultCacheCapacity);
     }
 
     /// <summary>
@@ -78,17 +84,19 @@ public sealed class CapabilityDomain : IAsyncDisposable
         Keystone.Runtime.Context.IContext? parentContext = null,
         CapabilitySupervisionOptions? supervision = null,
         Keystone.Runtime.Persistence.IEventStore? eventStore = null,
-        TimeSpan? slowRequestThreshold = null)
+        TimeSpan? slowRequestThreshold = null,
+        int? resultCacheCapacity = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
         ArgumentNullException.ThrowIfNull(handler);
 
         supervision ??= new CapabilitySupervisionOptions();
         var slowThreshold = slowRequestThreshold ?? _defaultSlowThreshold;
+        var cacheCapacity = resultCacheCapacity ?? _defaultResultCacheCapacity;
         var onSupervision = _onSupervision;
         var domainPrefix = _name;
         var props = Props.FromProducer(
-            () => new CapabilityActor(instanceName, handler, middlewares, parentContext, eventStore, slowThreshold))
+            () => new CapabilityActor(instanceName, handler, middlewares, parentContext, eventStore, slowThreshold, cacheCapacity))
             .WithGuardianSupervisorStrategy(new OneForOneStrategy(
                 decider: (pid, reason) => WrapDecider(pid, reason, instanceName, domainPrefix, onSupervision),
                 maxNrOfRetries: supervision.MaxRestarts,

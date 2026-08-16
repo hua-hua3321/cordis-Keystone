@@ -16,6 +16,16 @@ public sealed class KeystoneHostOptions
     /// 从 keystone 配置节绑定后赋值（ADR-0013：配置存在时以配置为准）。</summary>
     public Keystone.Core.KeystoneSettings FrameworkSettings { get; set; } = new();
 
+    /// <summary>文件监听防抖窗口（P71-T2：config/plugin watcher 各自可调，默认 100ms）。</summary>
+    public WatcherOptions Watchers { get; set; } = new();
+
+    /// <summary>配置写回管线可调值（P71-T2：占用重试/防抖/退避步长，默认对齐历史常量）。</summary>
+    public ConfigWriterOptions ConfigWriter { get; set; } = new();
+
+    /// <summary>能力域 actor 结果缓存容量（P71-T2：DC-13 幂等去重 FIFO 上限，默认 1024；
+    /// 内存敏感部署可调小——缓存命中返回旧结果，淘汰后重执行）。</summary>
+    public int ResultCacheCapacity { get; set; } = 1024;
+
     /// <summary>条目 → manifest（provides/inject 服务声明）。</summary>
     public Func<EntryOptions, PluginManifest> ManifestProvider { get; set; } =
         _ => throw new InvalidOperationException("ManifestProvider is not configured");

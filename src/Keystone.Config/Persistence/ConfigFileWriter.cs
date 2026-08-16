@@ -11,11 +11,20 @@ namespace Keystone.Config.Persistence;
 /// </summary>
 public class ConfigFileWriter : IDisposable
 {
+    /// <summary>占用重试次数默认值（P71-T2 入构造参数——历史硬编码常量）。</summary>
     private const int WriteRetryLimit = 10;
-    private const int AccessDeniedRetryLimit = 3; // P2-25：瞬态拒绝访问短退避次数（再降级）
-    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>瞬态拒绝访问退避次数默认值（P2-25；P71-T2 入构造参数）。</summary>
+    private const int AccessDeniedRetryLimit = 3;
+
+    /// <summary>重试退避步长默认值（ms，线性递增 (attempt+1)×step；P71-T2 入构造参数）。</summary>
+    private const int RetryBackoffStepMs = 50;
 
     private readonly string _path;
+    private readonly int _writeRetryLimit;
+    private readonly int _accessDeniedRetryLimit;
+    private readonly int _retryBackoffStepMs;
+    private readonly TimeSpan _debounceDelay;
     private readonly Lock _lock = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1); // P0-5（19 号审计 IN-3）：写串行化——对齐 Cordis writeQueue 单消费
     private IReadOnlyList<EntryOptions>? _pending;
@@ -28,10 +37,27 @@ public class ConfigFileWriter : IDisposable
     /// <summary>readonly 检出回调（CA-7，一次性触发；MA0046 免疫的普通委托属性，嵌入方可接日志/告警）。</summary>
     public Action? OnReadOnly { get; set; }
 
-    public ConfigFileWriter(string path)
+    /// <param name="writeRetryLimit">共享占用重试次数（默认 10）。</param>
+    /// <param name="accessDeniedRetryLimit">瞬态拒绝访问退避次数（默认 3，再降级只读）。</param>
+    /// <param name="path">目标配置文件路径。</param>
+    /// <param name="debounceDelay">写防抖窗口（默认 50ms）。</param>
+    /// <param name="retryBackoffStepMs">重试退避步长（默认 50ms）。</param>
+    public ConfigFileWriter(
+        string path,
+        int writeRetryLimit = WriteRetryLimit,
+        int accessDeniedRetryLimit = AccessDeniedRetryLimit,
+        TimeSpan? debounceDelay = null,
+        int retryBackoffStepMs = RetryBackoffStepMs)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentOutOfRangeException.ThrowIfLessThan(writeRetryLimit, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThan(accessDeniedRetryLimit, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThan(retryBackoffStepMs, 0);
         _path = path;
+        _writeRetryLimit = writeRetryLimit;
+        _accessDeniedRetryLimit = accessDeniedRetryLimit;
+        _retryBackoffStepMs = retryBackoffStepMs;
+        _debounceDelay = debounceDelay ?? TimeSpan.FromMilliseconds(50);
     }
 
     /// <summary>原子写入（重试 + 临时文件清理）。</summary>
@@ -66,7 +92,7 @@ public class ConfigFileWriter : IDisposable
         {
             _pending = entries;
             _debounce?.Dispose();
-            _debounce = new Timer(_ => _ = FlushObservedAsync(), null, DebounceDelay, Timeout.InfiniteTimeSpan);
+            _debounce = new Timer(_ => _ = FlushObservedAsync(), null, _debounceDelay, Timeout.InfiniteTimeSpan);
         }
     }
 
@@ -158,22 +184,22 @@ public class ConfigFileWriter : IDisposable
                 await PerformAtomicWriteAsync(_path, content).ConfigureAwait(false);
                 return;
             }
-            catch (IOException ex) when (IsSharingViolation(ex) && attempt < WriteRetryLimit)
+            catch (IOException ex) when (IsSharingViolation(ex) && attempt < _writeRetryLimit)
             {
-                await Task.Delay((attempt + 1) * 50).ConfigureAwait(false);
+                await Task.Delay((attempt + 1) * _retryBackoffStepMs).ConfigureAwait(false);
             }
-            catch (IOException ex) when (attempt >= WriteRetryLimit)
+            catch (IOException ex) when (attempt >= _writeRetryLimit)
             {
                 throw new KeystoneException(
                     ErrorCode.ConfigProviderFailed,
-                    $"failed to write config file {_path} after {WriteRetryLimit} attempts: {ex.Message}",
+                    $"failed to write config file {_path} after {_writeRetryLimit} attempts: {ex.Message}",
                     ex);
             }
-            catch (Exception ex) when (IsAccessDenied(ex) && attempt < AccessDeniedRetryLimit)
+            catch (Exception ex) when (IsAccessDenied(ex) && attempt < _accessDeniedRetryLimit)
             {
                 // P2-25（19 号审计 IN-5，对齐 Cordis include 预检+重试）：瞬态拒绝访问
                 //（编辑器/杀毒软件短暂占用 ACL）先短退避重试，再判死降级
-                await Task.Delay((attempt + 1) * 50).ConfigureAwait(false);
+                await Task.Delay((attempt + 1) * _retryBackoffStepMs).ConfigureAwait(false);
             }
             catch (Exception ex) when (IsAccessDenied(ex))
             {

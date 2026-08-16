@@ -319,6 +319,8 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// 进程内全局 listener 使导出内容不可归因于单宿主，配置生效性以本状态为准）。</summary>
     internal bool TracerProviderBuilt => _tracerProvider is not null;
     internal bool MeterProviderBuilt => _meterProvider is not null; // P70-T5：指标导出管线是否已建
+    internal TimeSpan? ConfigWatcherDebounce => _configWatcher?.DebounceDelay; // P71-T2：防抖配置下传探针
+    internal TimeSpan? PluginWatcherDebounce => _pluginWatcher?.DebounceDelay;
 
     /// <summary>
     /// 宿主事件总线（P22，B4 公开事件面）：StartAsync 后可用（root context 共享总线，ID-08）。
@@ -358,7 +360,13 @@ public sealed class KeystoneHost : IAsyncDisposable
     {
         if (_configWriter is null)
         {
-            _configWriter = new Keystone.Config.Persistence.ConfigFileWriter(_options.ConfigFilePath!);
+            var writerOptions = _options.ConfigWriter; // P71-T2：写回可调值入配置面
+            _configWriter = new Keystone.Config.Persistence.ConfigFileWriter(
+                _options.ConfigFilePath!,
+                writerOptions.WriteRetryLimit,
+                writerOptions.AccessDeniedRetryLimit,
+                writerOptions.DebounceDelay,
+                writerOptions.RetryBackoffStepMs);
             _configWriter.OnWriteFailed += (_, _) =>
                 Keystone.Runtime.Trace.KeystoneMeter.WriterFailures.Add(1);
         }
@@ -1172,7 +1180,7 @@ public sealed class KeystoneHost : IAsyncDisposable
             var patched = ApplyConfigPatches(tree);
             // CA-15：文件已是新值——不写回（防回环写）
             await ApplyConfigAsync(patched, save: false).ConfigureAwait(false);
-        });
+        }, _options.Watchers.ConfigFileDebounce);
     }
 
     /// <summary>
@@ -1197,7 +1205,8 @@ public sealed class KeystoneHost : IAsyncDisposable
             throw new KeystoneException(ErrorCode.ConfigValidationFailed, "no plugin roots configured to watch");
         }
 
-        _pluginWatcher = new PluginFileWatcher(roots[0], file => OnPluginSourceChangedAsync(file, roots));
+        _pluginWatcher = new PluginFileWatcher(
+            roots[0], file => OnPluginSourceChangedAsync(file, roots), _options.Watchers.PluginFileDebounce);
     }
 
     private async Task OnPluginSourceChangedAsync(string file, string[] roots)
@@ -1256,7 +1265,8 @@ public sealed class KeystoneHost : IAsyncDisposable
             onSupervision: decision => _rootContext?.EmitFireAndForget(
                 new Keystone.Runtime.Events.ActorRestartedFact(
                     decision.InstanceName, decision.Reason.Message)),
-            slowRequestThreshold: _options.Observability.SlowRequestThreshold);
+            slowRequestThreshold: _options.Observability.SlowRequestThreshold,
+            resultCacheCapacity: _options.ResultCacheCapacity);
 
     /// <summary>
     /// P70-T2（ADR-0018 L3）：OTel 接线——AddSource 订阅 Runtime 探针源；Console 默认开
