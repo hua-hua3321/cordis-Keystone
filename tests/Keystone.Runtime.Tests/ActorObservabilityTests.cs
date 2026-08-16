@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Keystone.Core.Contracts;
 using Keystone.Runtime.Actors;
 using Keystone.Runtime.Context;
+using Keystone.Runtime.Persistence;
 using Keystone.Runtime.Trace;
 
 namespace Keystone.Runtime.Tests;
@@ -251,6 +252,38 @@ public class ActorObservabilityTests
                 }
             },
         };
+    }
+
+    // ── 停止事实面（P70-T5，ADR-0018 L2）──
+
+    [Fact]
+    public async Task Actor_stop_emits_actor_stopped_fact()
+    {
+        var store = new InMemoryEventStore();
+        await using var domain = CapabilityDomain.Create("obs");
+        var handle = domain.Spawn("t3-stop", e => Task.FromResult(Ok(e)), eventStore: store);
+        await domain.RequestAsync(handle, Envelope("ping"), CancellationToken.None);
+
+        await domain.DisposeAsync(); // ShutdownAsync → actors 收 Stopped → 发 ActorStoppedFact
+
+        var hasStopped = false;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (!hasStopped && DateTime.UtcNow < deadline)
+        {
+            var names = new List<string>();
+            await foreach (var fact in store.ReplayAsync(new ReplayQuery(), CancellationToken.None))
+            {
+                names.Add(fact.EventName ?? string.Empty);
+            }
+
+            hasStopped = names.Contains("ActorStoppedFact");
+            if (!hasStopped)
+            {
+                await Task.Delay(20, CancellationToken.None);
+            }
+        }
+
+        Assert.True(hasStopped, "actor 停止应发射 ActorStoppedFact 入审计流");
     }
 
     // ── 日志面 ──

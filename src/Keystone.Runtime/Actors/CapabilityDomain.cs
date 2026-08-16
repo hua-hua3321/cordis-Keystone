@@ -1,4 +1,6 @@
 using Keystone.Core.Contracts;
+using Keystone.Runtime.Events;
+using Keystone.Runtime.Persistence;
 using Keystone.Runtime.Pipeline;
 using Proto;
 
@@ -18,6 +20,7 @@ public sealed class CapabilityDomain : IAsyncDisposable
 
     private readonly Action<SupervisionDecision>? _onSupervision;
     private readonly TimeSpan? _defaultSlowThreshold;
+    private readonly List<(string Name, IEventStore? Store)> _spawned = []; // P70-T5：spawn 实例记账（停止时发 ActorStoppedFact）
 
     private CapabilityDomain(
         ActorSystem system, string name, bool ownsSystem,
@@ -91,6 +94,7 @@ public sealed class CapabilityDomain : IAsyncDisposable
                 maxNrOfRetries: supervision.MaxRestarts,
                 withinTimeSpan: supervision.RestartWindow));
         var pid = _system.Root.SpawnNamed(props, $"{_name}-{instanceName}");
+        _spawned.Add((instanceName, eventStore));
         return new CapabilityHandle(this, pid);
     }
 
@@ -156,6 +160,17 @@ public sealed class CapabilityDomain : IAsyncDisposable
         if (_ownsSystem)
         {
             await _system.ShutdownAsync().ConfigureAwait(false);
+
+            // P70-T5（ADR-0018 L2）：实例停止事实入审计流（与 ActorRestartedFact 对称）——
+            // 显式 eventStore 的实例逐个落盘（Durable=false 尽力写，不阻塞关闭）
+            foreach (var (name, store) in _spawned)
+            {
+                if (store is not null)
+                {
+                    await new EventBus(store)
+                        .EmitAsync(new ActorStoppedFact(name)).ConfigureAwait(false);
+                }
+            }
         }
     }
 }
