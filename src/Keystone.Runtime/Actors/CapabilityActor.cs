@@ -41,7 +41,8 @@ internal sealed partial class CapabilityActor : IActor
         Func<TaskEnvelope, Task<TaskResultEnvelope>> handler,
         IReadOnlyList<IMiddleware>? middlewares = null,
         Keystone.Runtime.Context.IContext? parentContext = null,
-        Keystone.Runtime.Persistence.IEventStore? eventStore = null)
+        Keystone.Runtime.Persistence.IEventStore? eventStore = null,
+        TimeSpan? slowRequestThreshold = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
         ArgumentNullException.ThrowIfNull(handler);
@@ -52,7 +53,11 @@ internal sealed partial class CapabilityActor : IActor
         _instanceContext = new ContextFacade(instanceName, parentContext, eventStore: eventStore);
         // DC-10：构建一次缓存（无中间件 = 直通，语义与直调 handler 一致）
         _pipeline = BuildPipeline(middlewares ?? []);
+        // P70-T3：慢请求阈值（宿主 Observability 下传；null = 框架默认 5s）
+        _slowRequestThreshold = slowRequestThreshold ?? TimeSpan.FromSeconds(5);
     }
+
+    private readonly TimeSpan _slowRequestThreshold;
 
     /// <summary>实例名（事实事件 Capability 维度）。</summary>
     internal string InstanceName { get; }
@@ -65,44 +70,80 @@ internal sealed partial class CapabilityActor : IActor
         ArgumentNullException.ThrowIfNull(context);
         switch (context.Message)
         {
-            case DomainRequest { Envelope: var envelope, CancellationToken: var requestCt }:
-                // DC-13：幂等去重——重复 TaskId 直接回缓存（不重执行、不重发事实）
-                if (_results.TryGetValue(envelope.TaskId, out var cached))
-                {
-                    context.Respond(new DomainResponse(cached));
-                    break;
-                }
-
-                // DC-14：已取消请求 fail-fast——不执行 handler（06 §1 取消贯穿；记录失败非异常升级）
-                TaskResultEnvelope result;
-                if (requestCt.IsCancellationRequested)
-                {
-                    result = CancelledResult(envelope);
-                }
-                else
-                {
-                    // P68 归因分离：终端 handler 崩溃 = 业务监督面（05 §2 重启契约）——
-                    // 先回填 future（调用方立即得失败结果，不挂死）再上抛触发 OneForOne 重启
-                    try
-                    {
-                        result = await ExecuteRequestAsync(envelope, requestCt).ConfigureAwait(false);
-                    }
-                    catch (HandlerFaultException fault)
-                    {
-                        await RespondHandlerFaultAsync(context, envelope, fault).ConfigureAwait(false);
-                        throw; // actor 崩溃 → 监督重启（05 §2；context.Respond 已送达——future 已完成）
-                    }
-                }
-
-                RecordResult(envelope.TaskId, result);
-                await PublishFactAsync(envelope, result).ConfigureAwait(false); // DC-11：任务完成/失败事实
-                context.Respond(new DomainResponse(result));
+            case DomainRequest request:
+                await HandleDomainRequestAsync(context, request).ConfigureAwait(false);
                 break;
 
             case SwapPipeline { Middlewares: var middlewares }:
                 // DC-10：原子替换——新链构建完成后换引用；串行循环内在途请求已捕获旧链（无交错）
                 _pipeline = BuildPipeline(middlewares);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// DomainRequest 处理（P70-T3 边界观测）：消息模型调试性三面在此汇合——
+    /// 结构化日志（进 Debug/出 Information 含耗时）+ meter（requests/duration/slow）+ 既有事实。
+    /// 缓存命中/取消路径不走完整观测（非执行面）。
+    /// </summary>
+    private async Task HandleDomainRequestAsync(IContext context, DomainRequest request)
+    {
+        var envelope = request.Envelope;
+        // DC-13：幂等去重——重复 TaskId 直接回缓存（不重执行、不重发事实）
+        if (_results.TryGetValue(envelope.TaskId, out var cached))
+        {
+            context.Respond(new DomainResponse(cached));
+            return;
+        }
+
+        LogRequestStarted(_instanceContext.Logger, InstanceName, envelope.TaskId,
+            envelope.Capability ?? "unknown", envelope.Operation ?? "unknown");
+
+        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        // DC-14：已取消请求 fail-fast——不执行 handler（06 §1 取消贯穿；记录失败非异常升级）
+        TaskResultEnvelope result;
+        if (request.CancellationToken.IsCancellationRequested)
+        {
+            result = CancelledResult(envelope);
+        }
+        else
+        {
+            // P68 归因分离：终端 handler 崩溃 = 业务监督面（05 §2 重启契约）——
+            // 先回填 future（调用方立即得失败结果，不挂死）再上抛触发 OneForOne 重启
+            try
+            {
+                result = await ExecuteRequestAsync(envelope, request.CancellationToken).ConfigureAwait(false);
+            }
+            catch (HandlerFaultException fault)
+            {
+                await RespondHandlerFaultAsync(context, envelope, fault).ConfigureAwait(false);
+                RecordObservations(envelope, startedAt, succeeded: false);
+                throw; // actor 崩溃 → 监督重启（05 §2；context.Respond 已送达——future 已完成）
+            }
+        }
+
+        RecordResult(envelope.TaskId, result);
+        await PublishFactAsync(envelope, result).ConfigureAwait(false); // DC-11：任务完成/失败事实
+        RecordObservations(envelope, startedAt, result.Succeeded); // 先观测后 Respond——future 完成即观测已落地（无竞态窗口）
+        context.Respond(new DomainResponse(result));
+    }
+
+    /// <summary>完成面观测（P70-T3）：出边界日志 + requests/duration 计量 + 慢请求告警。</summary>
+    private void RecordObservations(TaskEnvelope envelope, long startedAt, bool succeeded)
+    {
+        var durationMs = System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+        var capability = envelope.Capability ?? "unknown";
+        LogRequestCompleted(_instanceContext.Logger, InstanceName, envelope.TaskId, succeeded, durationMs);
+        Keystone.Runtime.Trace.KeystoneMeter.ActorRequests.Add(
+            1, [new("capability", capability), new("instance", InstanceName)]);
+        Keystone.Runtime.Trace.KeystoneMeter.ActorRequestDuration.Record(
+            durationMs, [new("capability", capability)]);
+        if (durationMs > _slowRequestThreshold.TotalMilliseconds)
+        {
+            Keystone.Runtime.Trace.KeystoneMeter.SlowRequests.Add(1, [new("capability", capability)]);
+            LogSlowRequest(_instanceContext.Logger, InstanceName, envelope.TaskId, durationMs,
+                _slowRequestThreshold.TotalMilliseconds);
         }
     }
 
@@ -132,6 +173,8 @@ internal sealed partial class CapabilityActor : IActor
         {
             // 消息模型调试性（P68）：actor 边界是异常最后可见点——必须落日志
             //（category = 实例名；TaskId 关联事实事件与 trace）
+            Keystone.Runtime.Trace.KeystoneMeter.ActorFaults.Add(
+                1, [new("instance", InstanceName), new("faultType", "pipeline")]);
             LogPipelineFault(_instanceContext.Logger, InstanceName, envelope.TaskId, ex.GetType().Name, ex.Message, ex);
             return FailedResult(envelope, ex);
         }
@@ -197,6 +240,22 @@ internal sealed partial class CapabilityActor : IActor
     private static partial void LogPipelineFault(
         ILogger logger, string instance, Guid taskId, string faultType, string faultMessage, Exception exception);
 
+    // P70-T3：消息边界常规记录（进 Debug / 出 Information 含耗时；慢请求 Warning）
+    [LoggerMessage(EventId = 6002, Level = LogLevel.Debug,
+        Message = "actor '{instance}' task {taskId} start: {capability}/{operation}")]
+    private static partial void LogRequestStarted(
+        ILogger logger, string instance, Guid taskId, string capability, string operation);
+
+    [LoggerMessage(EventId = 6003, Level = LogLevel.Information,
+        Message = "actor '{instance}' task {taskId} completed: succeeded={succeeded} durationMs={durationMs:F1}")]
+    private static partial void LogRequestCompleted(
+        ILogger logger, string instance, Guid taskId, bool succeeded, double durationMs);
+
+    [LoggerMessage(EventId = 6004, Level = LogLevel.Warning,
+        Message = "slow request: actor '{instance}' task {taskId} took {durationMs:F1}ms (threshold {thresholdMs:F0}ms)")]
+    private static partial void LogSlowRequest(
+        ILogger logger, string instance, Guid taskId, double durationMs, double thresholdMs);
+
     /// <summary>P68 归因：终端 handler 调用统一包裹——崩溃打 <see cref="HandlerFaultException"/> 标记
     ///（区别于中间件异常：监督契约保留——回填后仍上抛触发 OneForOne 重启，05 §2）。</summary>
     private static TaskResultEnvelope InvokeHandlerMarked(
@@ -216,6 +275,8 @@ internal sealed partial class CapabilityActor : IActor
     private async Task RespondHandlerFaultAsync(IContext context, TaskEnvelope envelope, HandlerFaultException fault)
     {
         var inner = fault.InnerException;
+        Keystone.Runtime.Trace.KeystoneMeter.ActorFaults.Add(
+            1, [new("instance", InstanceName), new("faultType", "handler")]);
         LogPipelineFault(
             _instanceContext.Logger, InstanceName, envelope.TaskId,
             inner.GetType().Name, inner.Message, inner);

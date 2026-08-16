@@ -16,32 +16,45 @@ public sealed class CapabilityDomain : IAsyncDisposable
     private readonly string _name;
     private readonly bool _ownsSystem;
 
-    private CapabilityDomain(ActorSystem system, string name, bool ownsSystem)
+    private readonly Action<SupervisionDecision>? _onSupervision;
+    private readonly TimeSpan? _defaultSlowThreshold;
+
+    private CapabilityDomain(
+        ActorSystem system, string name, bool ownsSystem,
+        Action<SupervisionDecision>? onSupervision = null,
+        TimeSpan? defaultSlowThreshold = null)
     {
         _system = system;
         _name = name;
         _ownsSystem = ownsSystem;
+        _onSupervision = onSupervision;
+        _defaultSlowThreshold = defaultSlowThreshold;
     }
+
+    /// <summary>监督决策通知（P70-T3，ADR-0018）：Restart/Stop 决策 + 原因——宿主据此发事实/接线告警。</summary>
+    public sealed record SupervisionDecision(string InstanceName, Exception Reason, string Directive);
 
     /// <summary>创建能力域（内部持有独立 ActorSystem；宿主/管理层生命周期管理，Dispose 时释放）。</summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Reliability",
         "CA2000",
         Justification = "ActorSystem 所有权转移给 CapabilityDomain，由本域 DisposeAsync 统一释放")]
-    public static CapabilityDomain Create(string name)
+    public static CapabilityDomain Create(
+        string name, Action<SupervisionDecision>? onSupervision = null, TimeSpan? slowRequestThreshold = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return new CapabilityDomain(new ActorSystem(), name, ownsSystem: true);
+        return new CapabilityDomain(new ActorSystem(), name, ownsSystem: true, onSupervision, slowRequestThreshold);
     }
 
     /// <summary>
     /// 创建能力域并注入既有 ActorSystem（测试缝 / 多域共享系统场景；调用方负责 system 生命周期）。
     /// </summary>
-    public static CapabilityDomain Attach(ActorSystem system, string name)
+    public static CapabilityDomain Attach(
+        ActorSystem system, string name, Action<SupervisionDecision>? onSupervision = null, TimeSpan? slowRequestThreshold = null)
     {
         ArgumentNullException.ThrowIfNull(system);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return new CapabilityDomain(system, name, ownsSystem: false);
+        return new CapabilityDomain(system, name, ownsSystem: false, onSupervision, slowRequestThreshold);
     }
 
     /// <summary>
@@ -61,19 +74,50 @@ public sealed class CapabilityDomain : IAsyncDisposable
         IReadOnlyList<IMiddleware>? middlewares = null,
         Keystone.Runtime.Context.IContext? parentContext = null,
         CapabilitySupervisionOptions? supervision = null,
-        Keystone.Runtime.Persistence.IEventStore? eventStore = null)
+        Keystone.Runtime.Persistence.IEventStore? eventStore = null,
+        TimeSpan? slowRequestThreshold = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceName);
         ArgumentNullException.ThrowIfNull(handler);
 
         supervision ??= new CapabilitySupervisionOptions();
-        var props = Props.FromProducer(() => new CapabilityActor(instanceName, handler, middlewares, parentContext, eventStore))
+        var slowThreshold = slowRequestThreshold ?? _defaultSlowThreshold;
+        var onSupervision = _onSupervision;
+        var domainPrefix = _name;
+        var props = Props.FromProducer(
+            () => new CapabilityActor(instanceName, handler, middlewares, parentContext, eventStore, slowThreshold))
             .WithGuardianSupervisorStrategy(new OneForOneStrategy(
-                decider: (_, _) => Proto.SupervisorDirective.Restart, // DC-4：崩溃重启（默认）
+                decider: (pid, reason) => WrapDecider(pid, reason, instanceName, domainPrefix, onSupervision),
                 maxNrOfRetries: supervision.MaxRestarts,
                 withinTimeSpan: supervision.RestartWindow));
         var pid = _system.Root.SpawnNamed(props, $"{_name}-{instanceName}");
         return new CapabilityHandle(this, pid);
+    }
+
+    /// <summary>
+    /// decider 包装（P70-T3，ADR-0018 L2/L1）：Restart 决策 → restarts 计数 + 监督回调
+    ///（宿主接线发 ActorRestartedFact）。监督路径不可被观测侧异常打断——回调异常吞掉（CA1031 豁免）。
+    /// </summary>
+    private static Proto.SupervisorDirective WrapDecider(
+        Proto.PID pid, Exception reason, string instanceName, string domainPrefix,
+        Action<SupervisionDecision>? onSupervision)
+    {
+        // CA1031：观测回调可抛任意异常——监督决策必须返回，不容观测面反噬可用性
+#pragma warning disable CA1031
+        try
+        {
+            Keystone.Runtime.Trace.KeystoneMeter.SupervisionRestarts.Add(
+                1, [new("instance", instanceName)]);
+            onSupervision?.Invoke(new SupervisionDecision(
+                instanceName, reason.GetBaseException(), nameof(Proto.SupervisorDirective.Restart)));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[keystone] supervision observation hook failed: {ex.Message}");
+        }
+#pragma warning restore CA1031
+
+        return Proto.SupervisorDirective.Restart; // DC-4：崩溃重启（默认）
     }
 
     /// <summary>跨域请求（等待响应；TaskId 贯穿，06 §1）。</summary>

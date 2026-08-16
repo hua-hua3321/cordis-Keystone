@@ -9,8 +9,19 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Keystone.Hosting.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Keystone.Config\Keystone.Config.csproj" />
     <ProjectReference Include="..\Keystone.Runtime\Keystone.Runtime.csproj" />
+  </ItemGroup>
+
+  <!-- ADR-0018 L3 组合/导出层：OTel SDK 仅宿主可选接线（探针层纯 BCL，见 Runtime） -->
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Exporter.Console" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
   </ItemGroup>
 
   <ItemGroup>

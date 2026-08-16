@@ -8,6 +8,9 @@ namespace Keystone.Hosting;
 /// <summary>宿主选项：条目 → manifest/源码/配置 schema 提供者（插件定位接线）。</summary>
 public sealed class KeystoneHostOptions
 {
+    /// <summary>观测性（P70/ADR-0018 L3：Console 默认开 / OTLP 可选 / 采样率 / 慢请求阈值）。</summary>
+    public ObservabilityOptions Observability { get; set; } = new();
+
     /// <summary>条目 → manifest（provides/inject 服务声明）。</summary>
     public Func<EntryOptions, PluginManifest> ManifestProvider { get; set; } =
         _ => throw new InvalidOperationException("ManifestProvider is not configured");

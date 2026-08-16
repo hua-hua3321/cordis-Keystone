@@ -1,5 +1,8 @@
 using Keystone.Config.Entries;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Keystone.Config.Validation;
 using Keystone.Core.Errors;
 using Keystone.Runtime.Actors;
@@ -33,6 +36,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     private Keystone.Runtime.Logging.RingBufferLoggerProvider? _ringBufferLogs; // CA-12：ServiceOptions logger 接线产物（诊断面）
     private Microsoft.Extensions.Logging.ILoggerFactory? _ownedLoggerFactory; // CA-12：自建 factory（Create 静态类型即接口；Shutdown 经此字段 Dispose）
     private CapabilityDomain? _capabilityDomain;
+    private OpenTelemetry.Trace.TracerProvider? _tracerProvider; // P70-T2：OTel 导出（ADR-0018 L3）
     private IReadOnlyList<string> _uncollectedPlugins = [];
     private bool _shutdown;
 
@@ -143,6 +147,8 @@ public sealed class KeystoneHost : IAsyncDisposable
             throw new KeystoneException(ErrorCode.ConfigValidationFailed, "at least one config layer is required");
         }
 
+        ConfigureObservability(); // P70-T2：OTel provider 先于一切——启动期 span 也在导出面
+
         // 1. 配置层：逐层解析（DC-8 插值按层展开）→ 分层叠加（08 §4）
         var interpolator = BuildInterpolator();
         var layers = layerYamls
@@ -177,7 +183,7 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         if (_options.EnableCapabilityDomain)
         {
-            _capabilityDomain = CapabilityDomain.Create(_options.CapabilityDomainName);
+            _capabilityDomain = CreateObservabilityWiredDomain();
         }
 
         // 6-7. 并行加载：依赖门控（PENDING 等待）天然实现拓扑序
@@ -305,6 +311,10 @@ public sealed class KeystoneHost : IAsyncDisposable
 
     /// <summary>能力域（01 §2 管理层职责）：跨域请求入口。StartAsync 后可用；未启用时为 null。</summary>
     public CapabilityDomain? GetCapabilityDomain() => _capabilityDomain;
+
+    /// <summary>P70-T2 诊断面：OTel provider 是否建立（Enabled=false 时 false——
+    /// 进程内全局 listener 使导出内容不可归因于单宿主，配置生效性以本状态为准）。</summary>
+    internal bool TracerProviderBuilt => _tracerProvider is not null;
 
     /// <summary>
     /// 宿主事件总线（P22，B4 公开事件面）：StartAsync 后可用（root context 共享总线，ID-08）。
@@ -1175,9 +1185,57 @@ public sealed class KeystoneHost : IAsyncDisposable
         await next().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// P70-T3 接线（ADR-0018）：监督决策 → 根总线事实（fire-and-forget——监督路径不被观测侧
+    /// 拖慢/打断）；慢阈值经域默认下传（Spawn 未显式给时生效）。
+    /// </summary>
+    private CapabilityDomain CreateObservabilityWiredDomain()
+        => CapabilityDomain.Create(
+            _options.CapabilityDomainName,
+            onSupervision: decision => _rootContext?.EmitFireAndForget(
+                new Keystone.Runtime.Events.ActorRestartedFact(
+                    decision.InstanceName, decision.Reason.Message)),
+            slowRequestThreshold: _options.Observability.SlowRequestThreshold);
+
+    /// <summary>
+    /// P70-T2（ADR-0018 L3）：OTel 接线——AddSource 订阅 Runtime 探针源；Console 默认开
+    /// （用户裁定）；OTLP 可选；采样率 &lt;1.0 启用比例采样（只控导出——功能保底 listener
+    /// 在探针层恒应答，GetCurrentTaskId 等进程内功能不受采样影响）。
+    /// </summary>
+    private void ConfigureObservability()
+    {
+        var obs = _options.Observability;
+        if (!obs.Enabled)
+        {
+            return; // 不建 provider：无导出（探针照常——功能保底独立于导出）
+        }
+
+        var builder = Sdk.CreateTracerProviderBuilder()
+            .AddSource(Keystone.Runtime.Trace.TraceContext.SourceName)
+            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("keystone"));
+
+        if (obs.SampleRatio is < 1.0 and >= 0)
+        {
+            builder = builder.SetSampler(new TraceIdRatioBasedSampler(obs.SampleRatio));
+        }
+
+        if (obs.ConsoleEnabled)
+        {
+            builder = builder.AddConsoleExporter();
+        }
+
+        if (obs.OtlpEndpoint is { } endpoint)
+        {
+            builder = builder.AddOtlpExporter(o => o.Endpoint = new Uri(endpoint));
+        }
+
+        _tracerProvider = builder.Build();
+    }
+
     public async ValueTask DisposeAsync()
     {
         await ShutdownAsync().ConfigureAwait(false);
+        _tracerProvider?.Dispose(); // P70-T2：最后拆——关闭路径 span 仍在导出面
         _configWriter?.Dispose(); // DC-15：写回器随宿主释放
         _retention?.Dispose(); // DC-18：定时 Prune 随宿主停止
         _configWatcher?.Dispose(); // DC-9：配置监听随宿主停止
