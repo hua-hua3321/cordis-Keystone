@@ -1150,6 +1150,7 @@ created: 2026-08-15
 | T2 task span 失败状态（P1） | keystone.task span 失败/取消标 ActivityStatusCode——修复前失败请求 span 无状态，OTel UI 显示为成功；handler 崩溃/中间件异常/管道短路标 Error，取消不标错 | CapabilityActor.cs | ActorObservabilityTests 2 例（ActivityListener 捕获：失败=Error / 成功≠Error）；486/486；Runtime AOT 零 IL | ✔ |
 | T3 ActorStoppedFact（P1） | 新增实例停止事实（ADR L2 明文承诺，与 ActorRestartedFact 对称）；Proto.Actor 的 Stopped 系统消息不送达 IActor.ReceiveAsync → 改为 CapabilityDomain 记账 spawn 实例 + DisposeAsync 落盘 | Events/ActorStoppedFact.cs（新）/ CapabilityDomain.cs | ActorObservabilityTests 1 例（域 Dispose 后事实可回放）；487/487；Runtime AOT 零 IL | ✔ |
 | T4 插件生命周期日志（P1） | PluginRuntime start/fail/stop 边界 LoggerMessage 源生成（6101-6103，category={域}/{插件ID}）——修复前生命周期只有事实无结构化日志 | PluginRuntime.cs | PluginLifecycleLoggingTests 2 例（start/stop 双日志 + init 失败 Error）；489/489；Runtime AOT 零 IL | ✔ |
+| T5 监督事实落盘修复（P1） | EmitFireAndForget → PublishParallelAsync 此前不持久化事实——ActorRestartedFact 经 fire-and-forget 发射从未入审计流（违背 ADR-0018 L2）；PublishParallelAsync 补 PersistFactAsync（与 EmitAsync 同序） | EventBus.cs | FactPersistenceTests 1 例（Publishing_fact_via_parallel_persists_to_store）；490/490；Runtime AOT 零 IL | ✔ |
 
 ## 8. 回溯索引（三向映射）
 

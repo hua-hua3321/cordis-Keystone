@@ -76,6 +76,28 @@ public class FactPersistenceTests
     }
 
     [Fact]
+    public async Task Publishing_fact_via_parallel_persists_to_store()
+    {
+        // P70-T5 修复：EmitFireAndForget → PublishParallelAsync 此前不持久化事实——
+        // ActorRestartedFact 等经 fire-and-forget 发射的监督事实从未入审计流（ADR-0018 L2 违背）
+        var store = new InMemoryEventStore();
+        var bus = new EventBus(store);
+        var taskId = Guid.NewGuid();
+
+        await bus.PublishParallelAsync(new TaskDone(taskId, "fs"));
+
+        Assert.Equal(1, await store.GetLastSequenceAsync(CancellationToken.None));
+        var replayed = new List<StoredFact>();
+        await foreach (var fact in store.ReplayAsync(new ReplayQuery(TaskId: taskId), CancellationToken.None))
+        {
+            replayed.Add(fact);
+        }
+
+        var persisted = Assert.Single(replayed);
+        Assert.Equal("TaskDone", persisted.EventName);
+    }
+
+    [Fact]
     public async Task Non_durable_fact_append_failure_does_not_break_emit()
     {
         // ADR-0009 决策 3：默认尽力写，失败降级不影响主链路

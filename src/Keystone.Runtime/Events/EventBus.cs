@@ -93,6 +93,13 @@ public sealed class EventBus : IEventBus
 
     public async Task PublishParallelAsync<TEvent>(TEvent e, IContext? publisher = null, CancellationToken cancellationToken = default)
     {
+        // P70-T5（DC-11 修复）：事实事件先记录后分发（与 EmitAsync 同序）——观察者异常不丢事实；
+        // EmitFireAndForget 经本路径发射的监督事实（ActorRestartedFact 等）自此真正入审计流
+        if (e is IFactEvent fact)
+        {
+            await PersistFactAsync(fact).ConfigureAwait(false);
+        }
+
         var tasks = new List<Task>();
         foreach (var entry in Snapshot<TEvent>(DispatchMode.Parallel))
         {
