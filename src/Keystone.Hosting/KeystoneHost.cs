@@ -556,12 +556,31 @@ public sealed class KeystoneHost : IAsyncDisposable
         await PatchContextAsync(updated, async () =>
         {
             ReplaceEntry(_tree, updated);
-            await ReloadPluginAsync(id).ConfigureAwait(false);
+            await UpdatePluginInPlaceAsync(id).ConfigureAwait(false); // D-1：真热更新（同 ALC 原地）
             if (save)
             {
                 ScheduleWriteBack(); // 应用成功才落盘（否决不写；CA-15 save=false 内存态不落盘）
             }
         }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// D-1（19 号审计 LD-6）：config-only 原地重启——同 ALC 新实例（不重编译/不换 ALC/不碰源码）。
+    /// 未托管条目（disabled/未加载）只改树不动运行时。
+    /// </summary>
+    private async Task UpdatePluginInPlaceAsync(string id)
+    {
+        var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
+        if (hosted is null)
+        {
+            return; // 未托管：树已更新，运行时无动作（加载时取新 config）
+        }
+
+        var entry = FindEntry(_tree, id)
+            ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
+        var config = await ResolvePluginConfigAsync(entry).ConfigureAwait(false)
+            ?? new Dictionary<string, object?>(StringComparer.Ordinal); // null config = 空配置（与启动路径同语义）
+        await hosted.Loader.UpdateConfigAsync(config).ConfigureAwait(false);
     }
 
     /// <summary>组合更新（CA-4，P59，对齐 Cordis tree.update）：一次调用改选项 + 跨组移动 + position。
@@ -655,7 +674,17 @@ public sealed class KeystoneHost : IAsyncDisposable
 #pragma warning disable CA1031
         try
         {
-            await ReloadPluginAsync(id).ConfigureAwait(false);
+            // D-1：loader 仍在 → 原地复原（不碰源码——失败场景源可能正是坏的）；
+            // 冷路径失败已拆卸 loader → 冷重启（树已复原，旧条目源可编译）
+            var hosted = _plugins.FirstOrDefault(p => string.Equals(p.EntryId, id, StringComparison.Ordinal));
+            if (hosted is not null)
+            {
+                await UpdatePluginInPlaceAsync(id).ConfigureAwait(false);
+            }
+            else
+            {
+                await ReloadPluginAsync(id).ConfigureAwait(false);
+            }
         }
         catch (Exception)
         {
@@ -681,7 +710,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         {
             ReplaceEntry(_tree, updated);
             torn(true);
-            await ReloadPluginAsync(id).ConfigureAwait(false);
+            await UpdatePluginInPlaceAsync(id).ConfigureAwait(false); // D-1：热分支原地通道
         }).ConfigureAwait(false);
     }
 

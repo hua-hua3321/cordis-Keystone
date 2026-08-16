@@ -16,14 +16,15 @@ public sealed class PluginLoader : IAsyncDisposable
     private readonly PluginManifest _manifest;
     private readonly IServiceDiscovery _discovery;
     private readonly Func<string, IPluginContext> _contextFactory;
-    private readonly IReadOnlyDictionary<string, object?> _config;
 
     private PluginAssemblyLoadContext _alc = null!;
+    private Type _pluginType = null!; // D-1：已加载程序集内的插件类型（原地通道复用——不重编译）
     private PluginRuntime? _runtime;
     private WeakReference? _unloadedAlc;
     private readonly Lock _disposeLock = new(); // P65 加固：Dispose/Reload 并发互斥
     private bool _disposed;
 
+    private IReadOnlyDictionary<string, object?> _config; // D-1：原地通道可更新（去 readonly）
     private readonly IReadOnlyDictionary<string, string>? _isolateMap;
 
     private PluginLoader(
@@ -63,6 +64,43 @@ public sealed class PluginLoader : IAsyncDisposable
         var loader = new PluginLoader(manifest, discovery, contextFactory, config, isolateMap);
         await loader.LoadSourceAsync(source).ConfigureAwait(false);
         return loader;
+    }
+
+    /// <summary>
+    /// D-1（19 号审计 LD-6，对齐 fiber.ts update()→restart()）：真热更新——config-only 原地重启。
+    /// 同 ALC 内：quiesce 旧 runtime → 新插件实例（同程序集 Activator）→ 新 PluginRuntime（新 config）。
+    /// 不重编译、不换 ALC、不触碰源码（源坏时热更不受影响——对齐 Cordis"同代码 restart"语义）。
+    /// 结构变/源码变仍走 <see cref="ReloadAsync"/>（冷重启分级不变）。
+    /// </summary>
+    public async Task UpdateConfigAsync(IReadOnlyDictionary<string, object?> newConfig)
+    {
+        ArgumentNullException.ThrowIfNull(newConfig);
+
+        lock (_disposeLock)
+        {
+            if (_disposed)
+            {
+                throw new KeystoneException(ErrorCode.LifecycleInvalidState, "loader is disposed");
+            }
+        }
+
+        // 同 StopCore 顺序：effect 收敛 → 插件 dispose → 摘 provides 注册（ALC 保持）
+        if (_runtime is not null)
+        {
+            await _runtime.StopAsync().ConfigureAwait(false);
+        }
+
+        _config = newConfig;
+        // IL2077/IL2074：插件加载层反射实例化（ADR-0002 例外域——ALC/Roslyn 层刻意排除在 AOT 标准外；
+        // 类型来自本 ALC 已加载程序集，宿主裁剪不涉及）
+#pragma warning disable IL2077, IL2074
+        var plugin = (IPlugin?)Activator.CreateInstance(_pluginType)
+#pragma warning restore IL2077, IL2074
+            ?? throw new KeystoneException(
+                ErrorCode.LifecycleLoadFailed,
+                $"plugin '{_manifest.Id}' could not be instantiated in place");
+        _runtime = new PluginRuntime(_manifest, _ => plugin, _discovery, _contextFactory, _isolateMap, _config);
+        await _runtime.StartAsync().ConfigureAwait(false);
     }
 
     /// <summary>热重载：加载新版本（新 ALC + 新 runtime）→ 旧版本 quiesce + ALC.Unload（02 §7）。
@@ -155,6 +193,7 @@ public sealed class PluginLoader : IAsyncDisposable
                 ErrorCode.LifecycleLoadFailed,
                 $"plugin '{source.Id}' does not expose an IPlugin implementation");
 
+        _pluginType = pluginType; // D-1：缓存类型供原地通道复用
         var plugin = (IPlugin?)Activator.CreateInstance(pluginType)
             ?? throw new KeystoneException(ErrorCode.LifecycleLoadFailed, $"plugin '{source.Id}' could not be instantiated");
 

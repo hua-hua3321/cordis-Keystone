@@ -1098,6 +1098,15 @@ created: 2026-08-15
 | T11 管道异常回填 + 监督观测面修正（回归发现） | 归因分离：中间件异常 → 失败结果回填 + actor 边界 LoggerMessage 日志（actor 存活）；终端 handler 崩溃 → HandlerFaultException 标记 → 回填 future 后上抛触发 OneForOne 重启（05 §2 监督契约保留）——修复"异常吞进永不完成的 Proto.Future"（全量挂起根因，人工二分 29 类才定位）；两处监督测试观测面更新（崩溃=即时失败结果而非挂到调用方超时） | CapabilityActor.cs | Middleware_exception_returns_failed_result_not_hang + 监督 3 例更新 | ✔ |
 | T12 回归 | 全量 6 套件 | 新增 18 测试 | 465/465；Hosting AOT 零 IL 警告 | ✔ |
 
+#### W69-01 P69：真热更新批（19 §3 D-1 / LD-6，ADR-0017）
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| T1 原地通道（D-1） | PluginLoader.UpdateConfigAsync：quiesce 旧 runtime → 同 ALC Activator 新实例（缓存 _pluginType）→ 新 PluginRuntime（新 config）——不重编译/不换 ALC/不碰源码（对齐 fiber.ts update→restart"同代码"语义） | PluginLoader.cs | Config_update_succeeds_even_when_source_is_broken + Config_update_restarts_in_place_on_same_assembly | ✔ |
+| T2 宿主接线（D-1） | UpdatePluginAsync 热分支 / UpdateEntryAsync 热分支 / 失败复原（loader 仍在→原地；冷路径失败 loader 已拆→回退冷重启）——PatchContext 瀑布可否决保持；冷路径分级不变（结构变/源码变仍 ReloadPluginAsync） | KeystoneHost.cs | UpdateEntry_config_only_also_takes_in_place_path + Structural_change_still_takes_cold_path_with_new_alc + 既有 108 例回归 | ✔ |
+| T3 ADR-0017 | 机制级决策独立成文：原地通道语义/分级表/静态累积接受面/备选否决 | docs/decisions/adr-0017 | frontmatter 校验通过 | ✔ |
+| T4 回归 | 全量 6 套件 | 新增 4 测试 | 469/469；Hosting AOT 零 IL 警告 | ✔ |
+
 #### T2 执行记录（2026-08-16）
 
 | 编号 | 工作项 | 类型 | 验收凭证 | 结果 |

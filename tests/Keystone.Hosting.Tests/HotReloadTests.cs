@@ -111,7 +111,7 @@ public class HotReloadTests
         await host.ShutdownAsync();
     }
 
-    private static void ForceGc()
+    internal static void ForceGc()
     {
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -121,7 +121,7 @@ public class HotReloadTests
     // 跨 ALC 读取（P57-T4 修既有 flake）：重载后新旧 ALC 短暂并存（ALC.Unload 异步、ForceGc 不保证立即回收），
     // GetAssemblies() 跨 LoadContext 的枚举顺序并无"最新在后"保证——"Reverse 取第一"会随机命中旧副本。
     // 改为确定语义：int 取全副本最大（计数只增）；string 取全副本（调用方用 Any 断言——重载语义即"新副本收到过 X"）。
-    private static int ReadStaticInt(string typeName, string fieldName)
+    internal static int ReadStaticInt(string typeName, string fieldName)
     {
         var values = ReadAllStaticFields(typeName, fieldName);
         return values.Count == 0
@@ -129,7 +129,7 @@ public class HotReloadTests
             : values.Max(v => (int)(v ?? 0));
     }
 
-    private static List<string?> ReadStaticStrings(string typeName, string fieldName)
+    internal static List<string?> ReadStaticStrings(string typeName, string fieldName)
         => ReadAllStaticFields(typeName, fieldName).Select(v => (string?)v).ToList();
 
     private static List<object?> ReadAllStaticFields(string typeName, string fieldName)
