@@ -4,7 +4,7 @@ name: Publish to NuGet
 # 1. 推送 v* tag（如 v1.0.0）→ 自动测试 + 打包 + 发布到 nuget.org（推荐，发版显式可控）
 # 2. 手动触发（Actions 页 → Run workflow）→ 用仓库默认版本（1.0.0）发布
 #
-# 前置条件：仓库 Settings → Secrets and variables → Actions 添加 NUGET_APIKEY
+# 前置条件：仓库 Settings → Secrets and variables → Actions 添加 KEYSTONE
 #   （nuget.org → API Keys 生成的 key，须有 Push new packages 权限）
 
 on:
@@ -58,4 +58,4 @@ jobs:
         run: dotnet pack cordis-csharp.slnx --no-build -c Release -o artifacts/nupkg -p:Version=${{ steps.version.outputs.version }}
 
       - name: Push to NuGet
-        run: dotnet nuget push "artifacts/nupkg/*.nupkg" --api-key ${{ secrets.NUGET_APIKEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push "artifacts/nupkg/*.nupkg" --api-key ${{ secrets.KEYSTONE }} --source https://api.nuget.org/v3/index.json --skip-duplicate
