@@ -1125,6 +1125,21 @@ created: 2026-08-15
 | W57-T1-03 | EntryOptions.Isolate → IReadOnlyDictionary<string,IsolateSpec>；EntryParser.ParseIsolate（map+列表 shim+严格 fail-fast）；EntrySerializer map 形态按键序回写；EntryTree.MergeIsolate 按名合并（None 移除）；ConfigDiffer 结构键档位编码（name=true/@label/=false） | 实现 | — | ✅ |
 | W57-T1-04 | 全量回归 345/345（Config 58→69，新增 11）；AOT 冒烟 Config+Hosting 双零 IL；08 §3 示例+字段表更新；独立提交 | 验收 | dotnet test 6 套件 Passed；publish grep 0 | ✅ |
 
+### 7.65 P70 观测性专项（ADR-0018）
+
+> 目标：消息模型排错从"人工二分"变"按 TaskId 一查到底"——P68 教训（中间件异常吞进永不完成的 Proto.Future，零日志零 trace 零痕迹，人工二分 29 个测试类才定位）。用户裁定：日志与追踪必须比原始 Cordis 更好。OTel 骨架三层（L1 探针纯 BCL / L2 事实复用 EventStore / L3 组合导出仅 Hosting）。
+
+#### W70-01 P70：观测性批（T0-T5）
+
+| 任务 | 目标 | 影响范围 | 验收 | 状态 |
+|------|------|---------|------|------|
+| T0 OTel 三包 | OpenTelemetry.Exporter.Console/OpenTelemetryProtocol/Extensions.Hosting 入 Hosting（CPM 管版本 1.12）；探针层保持零第三方依赖 | Directory.Packages.props / Keystone.Hosting.csproj | AOT 冒烟零警告零错误（OTel 1.12 全注解，无需 ADR-0015 式例外） | ✔ |
+| T1 TraceContext 迁移 | `new Activity(...)` → `ActivitySource.StartActivity`（"Keystone.Runtime"）+ 功能保底 listener（仅本 source 恒 AllData）——OTel 可见 + 采样协商；GetCurrentTaskId 功能零回退（RingBuffer taskId 标签依赖） | TraceContext.cs | Runtime Trace 迁移测试 3 例 | ✔ |
+| T2 L3 组合接线 | ObservabilityOptions（Enabled/Console 默认开/OTLP/采样率/慢阈值 5s）+ ConfigureObservability（AddSource 订阅 Runtime 探针源）+ Dispose 收口 | ObservabilityOptions.cs / KeystoneHostOptions.cs / KeystoneHost.cs | 端到端 2 例（span 经 Console 导出可见 + Enabled=false 不建 provider 功能保持） | ✔ |
+| T3 actor 切片 | 消息边界常规日志（进 Debug/出 Information 含耗时/慢 Warning，LoggerMessage 源生成）+ KeystoneMeter 七指标 + 慢请求告警 + 监督 decider 包装（GetBaseException 根因上报 + 回调异常不反噬监督路径）+ ActorRestartedFact fire-and-forget 发根总线 | CapabilityActor.cs / CapabilityDomain.cs / KeystoneMeter.cs / ActorRestartedFact.cs / KeystoneHost.cs | ActorObservabilityTests 5 例（专用非并行 collection + MeterListener long/double 双注册） | ✔ |
+| T4 config/host 切片 | keystone.config.apply / entry / group.transaction / hotupdate 四 span + hotupdate.operations（hot|cold）+ writer.failures 计数接线（EnsureConfigWriter OnWriteFailed → counter）；PluginLoader 暴露 CurrentConfig（hotupdate span old→new keys 素材）；逐条目 channel 分级（added/removed/disabled/structural=cold，config-changed=hot） | KeystoneHost.cs / PluginLoader.cs / TraceContext.cs（常量面） | ConfigObservabilityTests 4 例（apply/entry/group-tx span + hotupdate span + hot/cold 计数 + writer.failures） | ✔ |
+| T5 回归 + AOT + 文档 | 全量 6 套件 + AOT 冒烟 + 14/11/AGENTS 回写 | 全仓 | 483/483（Core 30 / AI 19 / Config 84 / Sdk 35 / Runtime 201 / Hosting 114）；Hosting/Runtime AOT 零 IL；frontmatter 过 | ✔ |
+
 ## 8. 回溯索引（三向映射）
 
 > 目的：三条路径都能走通——**决策→代码**（改设计时查影响）、**代码→决策**（看代码时查依据）、**工作→文档**（回溯时查上下文）。
@@ -1263,6 +1278,7 @@ created: 2026-08-15
 | ID-51 | CA-1 决策收口；抽象接缝裁定 | `docs/`（18/11） | W55-01~03 |
 | W56-01~04 | ID-52 | `18-cordis-code-parity-audit.md`、`AGENTS.md` | 纯文档（无代码） |
 | ID-52 | 发现接口收窄；同步契约；锁内发事件隐患证实 | `docs/`（18） | W56-01~03 |
+| W70-01 | ADR-0018；05 §5 | `src/Keystone.Hosting/KeystoneHost.cs`、`src/Keystone.Runtime/Trace/`、`src/Keystone.Runtime/Actors/`、`src/Keystone.Runtime/Plugins/Loading/PluginLoader.cs` | ObservabilityWiringTests(2) + ActorObservabilityTests(5) + ConfigObservabilityTests(4) + Trace 迁移(3) |
 
 ## 9. 维护规则
 

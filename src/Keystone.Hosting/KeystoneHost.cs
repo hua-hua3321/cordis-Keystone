@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Keystone.Config.Entries;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
@@ -11,6 +12,7 @@ using Keystone.Runtime.Plugins.Lifecycle;
 using Keystone.Runtime.Plugins.Loading;
 using Keystone.Runtime.Plugins.Manifest;
 using Keystone.Runtime.Plugins.Services;
+using Keystone.Runtime.Trace;
 
 namespace Keystone.Hosting;
 
@@ -560,6 +562,8 @@ public sealed class KeystoneHost : IAsyncDisposable
             source, manifest, _discovery, ctxId => new ContextFacade(ctxId, _rootContext, isolateMap: isolateMap), config, isolateMap).ConfigureAwait(false);
 
         _plugins.Add(new HostedPlugin(id, loader));
+        // P70-T4（ADR-0018 L1）：冷重启计数（重编译 + 换 ALC 通道）
+        KeystoneMeter.HotUpdateOperations.Add(1, [new(TraceContext.ChannelTag, "cold")]);
         EntryInit?.Invoke(this, new EntryInitEventArgs(entry));
         NotifyConfigUpdate();
     }
@@ -605,7 +609,14 @@ public sealed class KeystoneHost : IAsyncDisposable
             ?? throw new KeystoneException(ErrorCode.ConfigValidationFailed, $"entry not found: {id}");
         var config = await ResolvePluginConfigAsync(entry).ConfigureAwait(false)
             ?? new Dictionary<string, object?>(StringComparer.Ordinal); // null config = 空配置（与启动路径同语义）
+
+        // P70-T4（ADR-0018 L1）：真热更新 span（old→new keys）+ hot 通道计数——D-1 原地通道专用
+        using var activity = StartHostSpan(TraceContext.HotUpdateActivityName);
+        activity.SetTag(TraceContext.EntryIdTag, id);
+        activity.SetTag(TraceContext.OldKeysTag, JoinKeys(hosted.Loader.CurrentConfig));
+        activity.SetTag(TraceContext.NewKeysTag, JoinKeys(config));
         await hosted.Loader.UpdateConfigAsync(config).ConfigureAwait(false);
+        KeystoneMeter.HotUpdateOperations.Add(1, [new(TraceContext.ChannelTag, "hot")]);
     }
 
     /// <summary>组合更新（CA-4，P59，对齐 Cordis tree.update）：一次调用改选项 + 跨组移动 + position。
@@ -832,8 +843,22 @@ public sealed class KeystoneHost : IAsyncDisposable
                 return; // deepEqual 相等即跳过（08 §6.1）
             }
 
-            await ApplyDiffTransactionallyAsync(diff, save).ConfigureAwait(false);
-            ConfigReloaded?.Invoke(this, new ConfigReloadedEventArgs(diff.ChangedIds));
+            using var activity = StartHostSpan(TraceContext.ConfigApplyActivityName);
+            activity.SetTag(TraceContext.EntriesTag, diff.ChangedIds.Count);
+            try
+            {
+                await ApplyDiffTransactionallyAsync(diff, save).ConfigureAwait(false);
+                ConfigReloaded?.Invoke(this, new ConfigReloadedEventArgs(diff.ChangedIds));
+                activity.SetTag(TraceContext.FailuresTag, 0);
+                activity.SetTag(TraceContext.RolledBackTag, false);
+            }
+            catch (Exception ex)
+            {
+                activity.SetTag(TraceContext.FailuresTag, FailureCount(ex));
+                activity.SetTag(TraceContext.RolledBackTag, true);
+                activity.SetStatus(ActivityStatusCode.Error, ex.Message);
+                throw;
+            }
         }
         finally
         {
@@ -847,6 +872,9 @@ public sealed class KeystoneHost : IAsyncDisposable
     /// 每步前 ThrowIfShuttingDown（Disposal owns termination：卸载中的组更新不回滚）。</summary>
     private async Task ApplyDiffTransactionallyAsync(ConfigDiff diff, bool save)
     {
+        using var activity = StartHostSpan(TraceContext.GroupTransactionActivityName);
+        activity.SetTag(TraceContext.GroupTag, "root");
+
         var applied = new List<Func<Task>>(); // 逆序回滚动作栈（成功一步记一步）
         var failures = new List<Exception>();
         _suppressWriteBack = !save; // CA-15：save=false（watcher 路径）→ 子操作写回抑制（防回环）
@@ -882,6 +910,8 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         if (failures.Count > 0)
         {
+            activity.SetTag(TraceContext.OutcomeTag, "rolled-back");
+            activity.SetStatus(ActivityStatusCode.Error);
             _suppressWriteBack = true; // 回滚动作同样不写回（树最终回到调用方期望态）
             try
             {
@@ -891,6 +921,10 @@ public sealed class KeystoneHost : IAsyncDisposable
             {
                 _suppressWriteBack = false;
             }
+        }
+        else
+        {
+            activity.SetTag(TraceContext.OutcomeTag, "applied");
         }
     }
 
@@ -907,6 +941,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         await CollectPerItemAsync(removed, failures, async id =>
         {
             ThrowIfShuttingDown();
+            using var activity = StartEntrySpan(id, "cold");
             await RemoveEntryAsync(id).ConfigureAwait(false);
         }).ConfigureAwait(false);
 
@@ -947,6 +982,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         }
 
         var addedId = added.Entry.Id!;
+        using var activity = StartEntrySpan(addedId, "cold");
         try
         {
             await CreateEntryAsync(added.Entry, added.ParentId, added.Position).ConfigureAwait(false);
@@ -964,6 +1000,7 @@ public sealed class KeystoneHost : IAsyncDisposable
     private async Task ApplyDisabledFlipAsync(EntryOptions entry, List<Func<Task>> applied)
     {
         ThrowIfShuttingDown();
+        using var activity = StartEntrySpan(entry.Id!, "cold");
         await SetEntryDisabledAsync(entry.Id!, entry.Disabled == true).ConfigureAwait(false);
         var flipId = entry.Id!;
         var flipBack = entry.Disabled != true;
@@ -978,6 +1015,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         bool save = true)
     {
         ThrowIfShuttingDown();
+        using var activity = StartEntrySpan(entry.Id!, "hot");
         PluginUpdating?.Invoke(this, new PluginUpdatingEventArgs(entry.Id!, entry.Config));
         await UpdatePluginAsync(entry.Id!, entry.Config, save).ConfigureAwait(false);
         var oldConfig = oldEntries.GetValueOrDefault(entry.Id!)?.Config;
@@ -1058,6 +1096,7 @@ public sealed class KeystoneHost : IAsyncDisposable
         foreach (var change in changed)
         {
             ThrowIfShuttingDown();
+            using var activity = StartEntrySpan(change.Entry.Id!, "cold");
             var entry = change.Entry;
             var oldEntry = oldEntries.GetValueOrDefault(entry.Id!);
             var (oldParent, oldIndex) = LocateEntry(_tree, entry.Id!);
@@ -1246,6 +1285,30 @@ public sealed class KeystoneHost : IAsyncDisposable
 
         _tracerProvider = builder.Build();
     }
+
+    /// <summary>开启宿主配置切片 span（P70-T4，ADR-0018 L1）：功能保底 listener 恒应答 →
+    /// 非空保证（与 <see cref="TraceContext.StartTask"/> 同契约）。</summary>
+    private static Activity StartHostSpan(string name)
+        => TraceContext.SourceForHosting.StartActivity(name)
+           ?? throw new InvalidOperationException(
+               "TraceContext functional guarantee listener missing; host span requires non-null activity");
+
+    /// <summary>逐条目应用 span（ADR-0018 L1：keystone.config.entry——entry.id / channel）。</summary>
+    private static Activity StartEntrySpan(string entryId, string channel)
+    {
+        var activity = StartHostSpan(TraceContext.ConfigEntryActivityName);
+        activity.SetTag(TraceContext.EntryIdTag, entryId);
+        activity.SetTag(TraceContext.ChannelTag, channel);
+        return activity;
+    }
+
+    /// <summary>config 键集串接（hotupdate span 的 old→new keys 标签，稳定排序）。</summary>
+    private static string JoinKeys(IReadOnlyDictionary<string, object?> config)
+        => string.Join(",", config.Keys.OrderBy(k => k, StringComparer.Ordinal));
+
+    /// <summary>事务失败数（单错=1；AggregateException=内层数——RollbackAsync 聚合上抛）。</summary>
+    private static int FailureCount(Exception ex)
+        => ex is AggregateException agg ? agg.InnerExceptions.Count : 1;
 
     public async ValueTask DisposeAsync()
     {

@@ -48,6 +48,9 @@ public sealed class PluginLoader : IAsyncDisposable
     /// <summary>最近一次卸载的 ALC 弱引用（测试/诊断：回收验证）。</summary>
     public WeakReference? UnloadedAlcReference => _unloadedAlc;
 
+    /// <summary>当前生效配置（P70-T4 观测：热更 span 的 old→new keys 素材——原地更新前的旧键集）。</summary>
+    public IReadOnlyDictionary<string, object?> CurrentConfig => _config;
+
     public static async Task<PluginLoader> CreateAsync(
         PluginSource source,
         PluginManifest manifest,
