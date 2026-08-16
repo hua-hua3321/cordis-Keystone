@@ -1024,7 +1024,7 @@ created: 2026-08-15
 |------|------|------|------|
 | T1 全源枚举 | Cordis 核心 9 文件（2693 行）+ plugin-include（377）+ plugin-loader（~1000）+ cosmokit/bin.js 逐文件行为点枚举 | 108 项发现（双侧 文件:行号） | ✔ 2026-08-16 |
 | T2 对抗验证 | P57 CA-1 / P58 CA-10 / P59 CA-3/4 / P60 CA-12 / P61 / P62 近期实现的正确性复查（找未测路径缺陷） | 两档域 schema 等 verified ✓；但发现 P0-1/2/3 落在 CA-3 未测路径、P0-7 落在 CA-9 未覆盖模式 | ✔ 2026-08-16 |
-| T3 汇总落档 | 19 号文档（P0 七项/P1 七项/D 九项/P2 廿项/verified 凭证/决策矩阵）+ 11 §3.4 登记 + AGENTS 索引 | docs/architecture/19-second-parity-verification-audit.md | ✔ 2026-08-16 |
+| T3 汇总落档 | 19 号文档（P0 七项/P1 七项/D 九项/P2 卅一项/verified 凭证/决策矩阵）+ 11 §3.4 登记 + AGENTS 索引 | docs/architecture/19-second-parity-verification-audit.md | ✔ 2026-08-16 |
 
 #### T2 执行记录（2026-08-16）
 

@@ -83,6 +83,7 @@ status: standard
 | P2-28 (IN-8) | EntrySerializer 回写失真 | EntrySerializer.cs:74-91 | list 形状回写：重复键/无引号/塌缩——建议补序列与引号保真 |
 | P2-29 (EV-13) | emit 仅收同步 Action | ContextFacade.cs:155-168 vs events.ts | Cordis fire-and-forget 异步监听无对应（.NET 侧需 SubscribeParallel）；注记或补 async 重载 |
 | P2-30 (EV-14) | 决策默认值 undefined vs null | EventBus vs events.ts | Cordis 未决策=undefined；Keystone=null——类型系统差异，注记即可 |
+| P2-31 (LD-5) | 注释称并行、实现串行 | GroupTransactionTests.cs:10 / EntryGroup.cs:75-76 vs KeystoneHost.cs:788-802 | CA-3 注释声称"对齐 allSettled 并行"，CollectPerItemAsync 实为逐条 await（Cordis group.ts:71 真并行）——单错抛因/多错聚合面等价但时序不同；修正注释或改 Task.WhenAll |
 
 ## 5. verified 凭证（对抗验证通过，择要）
 
